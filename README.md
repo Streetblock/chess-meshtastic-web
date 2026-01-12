@@ -57,3 +57,5 @@ This project is mostly vibe coded.
 ## Acknowledgements
 - Meshtastic team and community
 - Chessboard.js and Chess.js
+
+[![CodeFactor](https://www.codefactor.io/repository/github/compuvin/chess-meshtastic/badge?s=86272db5d82ae02637bf412de630592c0d49cdbb)](https://www.codefactor.io/repository/github/compuvin/chess-meshtastic)
