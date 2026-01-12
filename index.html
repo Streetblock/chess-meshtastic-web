@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Meshtastic Chess</title>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+  <style>
+    body { font-family: Arial, sans-serif; display:flex; flex-direction:column; align-items:center; padding-top:20px; }
+    #board { width: 420px; }
+    #connectionStatus { font-weight:bold; margin-bottom:10px; }
+    #gameStatus { font-size:1.1em; font-weight:bold; margin-top:8px; }
+    #connectionAlert { margin-top:6px; font-weight:bold; color:#b00020; }
+    button { margin: 0 6px; }
+  </style>
+</head>
+<body>
+  <h1>Meshtastic Web Chess</h1>
+  <div id="board"></div>
+
+  <div style="margin: 16px 0;">
+    <button id="connectBtn">🔌 Connect Meshtastic Radio</button>
+    <button id="disconnectBtn" disabled>🛑 Disconnect</button>
+  </div>
+  <div style="margin: 8px 0;">
+    <label for="opponentNodeId">Opponent Node ID:</label>
+    <input id="opponentNodeId" type="text" placeholder="e.g. 0x49308818 or !49308818" style="margin-left:6px; width: 220px;" />
+  </div>
+
+  <div id="connectionStatus">Status: Disconnected</div>
+  <div id="playerColorStatus"></div>
+  <div id="connectionAlert"></div>
+  <div id="gameStatus"></div>
+  <p><button id="resetBtn">Reset Game</button></p>
+
+  <script src="https://code.jquery.com/jquery-1.12.4.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+  <script src="vendor/protobuf.min.js"></script>
+
+  <script type="module">
+    import { ChessMeshtastic } from "./meshtastic-chess.js";
+
+    const $connectionStatus = $('#connectionStatus');
+    const $gameStatus = $('#gameStatus');
+
+    let board;
+    let game = new Chess();
+    let gameStarted = false;
+    let gameId = null;
+    let opponentNodeId = 0x49308818; // set to opponent node id (hex) or leave null for broadcast
+    let localPlayerColor = null;
+    let mySeed = null;
+    let opponentSeed = null;
+    let awaitingStart = false;
+    let moveCount = 0;
+    let lastMoveUci = null;
+    let moveTimeoutId = null;
+    let retryTimeoutId = null;
+    let retryIntervalId = null;
+    let retryAttempts = 0;
+    let awaitingCountReply = false;
+    const MOVE_TIMEOUT_MS = 3 * 60 * 1000;
+    const RETRY_WAIT_MS = 60 * 1000;
+    const RETRY_LIMIT = 5;
+
+    const conn = new ChessMeshtastic({
+      portnum: 1,
+      opponentNodeId,
+      gameId,
+      baudRate: 921600
+    });
+
+    // Chessboard config
+    const cbConfig = {
+      draggable: true,
+      position: 'start',
+      onDragStart,
+      onDrop,
+      onSnapEnd,
+      pieceTheme: 'img/chesspieces/wikipedia/{piece}.png'
+    };
+    board = ChessBoard('board', cbConfig);
+    updateStatus();
+
+    async function connect() {
+      try {
+        $connectionStatus.text("Status: 🟡 Connecting...");
+        await conn.connect();
+        $connectionStatus.text("Status: 🟢 Connected & Ready");
+        $('#connectBtn').prop('disabled', true);
+        $('#disconnectBtn').prop('disabled', false);
+        startHandshake();
+      } catch (e) {
+        console.error("Connect failed:", e);
+        $connectionStatus.text("Status: 🔴 Connection failed");
+      }
+    }
+
+    async function disconnect() {
+      await conn.disconnect();
+      $connectionStatus.text("Status: 🔴 Disconnected");
+      $('#connectBtn').prop('disabled', false);
+      $('#disconnectBtn').prop('disabled', true);
+    }
+
+    // -------------------- Sending & Receiving Moves --------------------
+    conn.onMove((moveMsg) => {
+      if (!moveMsg || !moveMsg.t) return;
+
+      if (moveMsg.t === "H") {
+        handleHandshake(moveMsg);
+        return;
+      }
+      if (moveMsg.t === "S") {
+        handleStart(moveMsg);
+        return;
+      }
+      if (moveMsg.t === "C") {
+        handleCountMessage(moveMsg);
+        return;
+      }
+      if (moveMsg.t !== "M") return;
+      if (moveMsg.g == null || moveMsg.g !== gameId) return;
+      console.log("[Game RX] Received move:", moveMsg.d);
+      const move = game.move(moveMsg.d, { sloppy: true });
+      if (move) {
+        board.position(game.fen());
+        moveCount += 1;
+        lastMoveUci = moveMsg.d;
+        clearMoveTimers();
+        clearConnectionAlert();
+      }
+      updateStatus();
+    });
+
+    async function sendMove(payload) {
+      if (!conn.connected) return console.warn("Not connected");
+      await conn.sendMove(payload);
+    }
+
+    // -------------------- Opponent Node ID --------------------
+    const $opponentNodeId = $('#opponentNodeId');
+    $opponentNodeId.val(opponentNodeId != null ? `0x${opponentNodeId.toString(16)}` : "");
+    $opponentNodeId.on('change', () => {
+      const raw = $opponentNodeId.val().trim();
+      if (!raw) {
+        opponentNodeId = null;
+        conn.opponentNodeId = null;
+        resetHandshake();
+        return;
+      }
+      let parsed = null;
+      if (raw.startsWith('!')) {
+        parsed = parseInt(raw.slice(1), 16);
+      } else if (raw.startsWith('0x') || raw.startsWith('0X')) {
+        parsed = parseInt(raw.slice(2), 16);
+      } else {
+        parsed = parseInt(raw, 10);
+      }
+      if (Number.isFinite(parsed) && !Number.isNaN(parsed)) {
+        opponentNodeId = parsed >>> 0;
+        conn.opponentNodeId = opponentNodeId;
+        resetHandshake();
+      } else {
+        console.warn("Invalid opponent node id:", raw);
+      }
+    });
+
+    // -------------------- Handshake --------------------
+    function resetHandshake() {
+      mySeed = null;
+      opponentSeed = null;
+      gameId = null;
+      conn.gameId = null;
+      gameStarted = false;
+      localPlayerColor = null;
+      awaitingStart = false;
+      moveCount = 0;
+      lastMoveUci = null;
+      clearMoveTimers();
+      clearConnectionAlert();
+      $('#playerColorStatus').text("");
+      updateStatus();
+    }
+
+    function startHandshake() {
+      if (!conn.connected) return;
+      if (opponentNodeId == null) {
+        console.warn("Opponent node id required to start.");
+        return;
+      }
+      if (mySeed != null) return;
+      mySeed = (Math.random() * 0xffffffff) >>> 0;
+      sendMove({ t: "H", s: mySeed });
+      updateStatus();
+    }
+
+    function handleHandshake(msg) {
+      if (typeof msg.s === 'number') {
+        opponentSeed = msg.s >>> 0;
+      }
+      if (mySeed == null) {
+        mySeed = (Math.random() * 0xffffffff) >>> 0;
+        sendMove({ t: "H", s: mySeed });
+      }
+      tryFinalizeHandshake();
+    }
+
+    function tryFinalizeHandshake() {
+      if (mySeed == null || opponentSeed == null) return;
+      const seedDiff = (mySeed >>> 0) - (opponentSeed >>> 0);
+      let iAmWhite = seedDiff > 0;
+      if (seedDiff === 0 && conn.myNodeNum != null && opponentNodeId != null) {
+        iAmWhite = conn.myNodeNum > opponentNodeId;
+      }
+
+      localPlayerColor = iAmWhite ? 'w' : 'b';
+      $('#playerColorStatus').text(`You are ${iAmWhite ? 'White' : 'Black'}.`);
+
+      if (seedDiff >= 0 && !awaitingStart) {
+        gameId = (Math.random() * 0xffffffff) >>> 0;
+        conn.gameId = gameId;
+        awaitingStart = true;
+        sendMove({ t: "S", g: gameId });
+        gameStarted = true;
+        updateStatus();
+      } else {
+        updateStatus();
+      }
+    }
+
+    function handleStart(msg) {
+      if (typeof msg.g !== 'number') return;
+      gameId = msg.g >>> 0;
+      conn.gameId = gameId;
+      gameStarted = true;
+      awaitingStart = true;
+      updateStatus();
+    }
+
+    function scheduleMoveTimeout() {
+      clearMoveTimers();
+      moveTimeoutId = setTimeout(() => {
+        sendCountRequest();
+        retryTimeoutId = setTimeout(() => {
+          showConnectionAlert("Connection lost. Retrying...");
+          startRetryLoop();
+        }, RETRY_WAIT_MS);
+      }, MOVE_TIMEOUT_MS);
+    }
+
+    function sendCountRequest(isReply = false) {
+      sendMove({ t: "C", g: gameId, c: moveCount, r: isReply });
+      awaitingCountReply = !isReply;
+    }
+
+    function startRetryLoop() {
+      stopRetryLoop();
+      retryAttempts = 0;
+      retryIntervalId = setInterval(() => {
+        retryAttempts += 1;
+        if (retryAttempts > RETRY_LIMIT) {
+          stopRetryLoop();
+          showConnectionAlert("Unable to re-establish connection to opponent");
+          return;
+        }
+        sendCountRequest();
+      }, RETRY_WAIT_MS);
+    }
+
+    function stopRetryLoop() {
+      if (retryIntervalId) {
+        clearInterval(retryIntervalId);
+        retryIntervalId = null;
+      }
+    }
+
+    function clearMoveTimers() {
+      if (moveTimeoutId) {
+        clearTimeout(moveTimeoutId);
+        moveTimeoutId = null;
+      }
+      if (retryTimeoutId) {
+        clearTimeout(retryTimeoutId);
+        retryTimeoutId = null;
+      }
+      stopRetryLoop();
+      awaitingCountReply = false;
+    }
+
+    function handleCountMessage(msg) {
+      if (msg.g != null && msg.g !== gameId) return;
+      if (typeof msg.c !== 'number') return;
+      console.log("[Game RX] Received count:", msg.c);
+      if (msg.c === moveCount) {
+        if (!msg.r) {
+          sendCountRequest(true);
+        }
+        clearMoveTimers();
+        clearConnectionAlert();
+        return;
+      }
+      if (msg.c < moveCount && lastMoveUci) {
+        sendMove({ g: gameId, t: "M", d: lastMoveUci });
+        return;
+      }
+      if (!msg.r) {
+        sendCountRequest(true);
+      }
+    }
+
+    function showConnectionAlert(text) {
+      $('#connectionAlert').text(text);
+    }
+
+    function clearConnectionAlert() {
+      $('#connectionAlert').text("");
+    }
+
+    // -------------------- Chess Events --------------------
+    function onDragStart(source, piece) {
+      if (game.game_over() || !gameStarted || !conn.connected) return false;
+      if (localPlayerColor == null) return false;
+      if (game.turn() !== localPlayerColor) return false;
+      if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+          (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+        return false;
+      }
+    }
+
+    function onDrop(source, target) {
+      const temp = { from: source, to: target, promotion: 'q' };
+      const move = game.move(temp);
+      if (!move) return 'snapback';
+
+      const moveUCI = move.from + move.to + (move.promotion ? move.promotion : '');
+      const payload = { g: gameId, t: "M", d: moveUCI };
+      sendMove(payload);
+      moveCount += 1;
+      lastMoveUci = moveUCI;
+      scheduleMoveTimeout();
+      updateStatus();
+    }
+
+    function onSnapEnd() { board.position(game.fen()); }
+
+    function updateStatus() {
+      let status = '';
+      const moveColor = (game.turn() === 'b') ? 'Black' : 'White';
+      if (game.game_over()) {
+        gameStarted = false;
+        status = game.in_checkmate() ? `Game over, ${moveColor} is in checkmate.` : 'Game over, drawn position.';
+      } else if (!gameStarted) {
+        status = 'Waiting for handshake...';
+      } else {
+        status = moveColor + ' to move.';
+        if (game.in_check()) status += ' (Check!)';
+      }
+      $gameStatus.text(status);
+    }
+
+    function resetGame() {
+      game = new Chess();
+      board.position('start');
+      if (gameId != null) {
+        gameStarted = true;
+      }
+      moveCount = 0;
+      lastMoveUci = null;
+      clearMoveTimers();
+      clearConnectionAlert();
+      updateStatus();
+    }
+
+    // -------------------- Event Binding --------------------
+    $('#connectBtn').on('click', connect);
+    $('#disconnectBtn').on('click', disconnect);
+    $('#resetBtn').on('click', resetGame);
+    updateStatus();
+  </script>
+</body>
+</html>
