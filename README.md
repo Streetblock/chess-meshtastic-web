@@ -25,6 +25,7 @@ This project is mostly vibe coded.
 ## Requirements
 - A browser with Web Serial support (Chromium-based)
 - Two Meshtastic radios on the same mesh
+- Recommended: add the `GameLobby` channel before playing
 
 ## Quick start
 1. Serve the folder with any static file server.
@@ -47,6 +48,16 @@ This project is mostly vibe coded.
 - The opponent node ID can be entered as `0x...`, `!...`, or decimal.
 - If you need to reset a game, use **Reset Game**.
 - This is a lightweight experimental project, not a full client.
+- Lobby channel details:
+  - Name: `GameLobby`
+  - PSK: `OpLah30Ci9oMvUDbXRGVcw3C55TOgUpQ23fxnYPpq2I=`
+  - Recommended to add it before playing for smooth matchmaking.
+- Licensing: the app uses the original third-party sources via their official URLs.
+  If you want offline copies, download these into `lib/`:
+  - https://code.jquery.com/jquery-1.12.4.min.js
+  - https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js
+  - https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js
+  - https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css
 
 ## Troubleshooting
 - If the handshake never completes, confirm both radios are on the same channel
