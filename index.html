@@ -331,7 +331,7 @@
       }
       $lobbyStatus.text(`Lobby channel not found: ${LOBBY_CHANNEL_NAME}`);
       $announceBtn.prop('disabled', true);
-      $seekChessBtn.prop('disabled', true);
+      $seekChessBtn.prop('disabled', !directConnectMode);
       if (lobbyChannelSeen) {
         $lobbyQr.show();
       }
@@ -686,9 +686,11 @@
       if (directConnectMode) {
         $opponentNodeWrap.show();
         $seekStatus.text("Enter a node ID, then click Chess to start.");
+        updateLobbyStatus();
       } else {
         $opponentNodeWrap.hide();
         $seekStatus.text("");
+        updateLobbyStatus();
       }
     });
     $announceBtn.on('click', announceLobbyPresence);
