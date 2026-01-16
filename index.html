@@ -712,6 +712,7 @@
       if (msg.t === "G" && msg.game === "chess") {
         if (seekingChess) {
           stopSeekingChess();
+          sendLobbyMessage({ t: "A", to: from, game: "chess" });
           startGameWith(from);
         }
         return;
@@ -799,7 +800,7 @@
         iAmWhite = conn.myNodeNum > opponentNodeId;
       }
 
-      iAmStarter = seedDiff >= 0;
+      iAmStarter = iAmWhite;
       localPlayerColor = iAmWhite ? 'w' : 'b';
       $playerColorStatus.text(`You are ${iAmWhite ? 'White' : 'Black'}.`);
 
