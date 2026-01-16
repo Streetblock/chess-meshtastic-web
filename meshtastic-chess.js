@@ -310,6 +310,7 @@ export class ChessMeshtastic {
         return;
       }
 
+      console.log("[CHESS RX]", parsed);
       if (this.onMoveCallback) {
         this.onMoveCallback(parsed, msg);
       }
