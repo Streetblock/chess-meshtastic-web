@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Meshtastic Chess</title>
 
-  <link rel="stylesheet" href="lib/chessboard-1.0.0.min.css" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css';">
+  <link rel="stylesheet" href="lobby.css">
   <script>
     function loadCdnScript(url, el) {
       if (el && el.dataset && el.dataset.cdnLoaded) return;
@@ -21,20 +21,6 @@
       }
     }
   </script>
-  <style>
-    body { font-family: Arial, sans-serif; display:flex; flex-direction:column; align-items:center; padding-top:20px; }
-    #board { width: 420px; }
-    #connectionStatus { font-weight:bold; margin-bottom:10px; }
-    #gameStatus { font-size:1.1em; font-weight:bold; margin-top:8px; }
-    #connectionAlert { margin-top:6px; font-weight:bold; color:#b00020; }
-    #lobbyList { width: 420px; margin-top: 10px; }
-    #lobbyList ul { list-style: none; padding: 0; margin: 0; }
-    #lobbyList li { display:flex; justify-content:space-between; align-items:center; padding: 6px 8px; border: 1px solid #ddd; margin-bottom: 6px; }
-    #lobbyList li.inactive { color: #8a8a8a; }
-    #lobbyQr { margin-top: 10px; text-align: center; }
-    #lobbyQr img { width: 220px; height: 220px; }
-    button { margin: 0 6px; }
-  </style>
 </head>
 <body>
   <h1>Meshtastic Web Chess</h1>
@@ -48,39 +34,41 @@
     <input id="opponentNodeId" type="text" placeholder="e.g. 0x49308818 or !49308818" style="margin-left:6px; width: 220px;" />
   </div>
 
-  <div id="connectionStatus">Status: Disconnected</div>
-  <div id="lobbyView">
-    <div id="lobbyStatus"></div>
-    <div id="lobbyQr" style="display:none;">
-      <div>GameLobby channel not found. Scan to add:</div>
-      <img src="img/GameLobby.png" alt="GameLobby channel QR code" />
-      <div style="margin-top:6px;">
-        Channel: <code>GameLobby</code><br />
-        PSK: <code>OpLah30Ci9oMvUDbXRGVcw3C55TOgUpQ23fxnYPpq2I=</code>
+  <div id="connectionStatus" class="status-pill status-disconnected">Status: Disconnected</div>
+  <div id="lobbyLayout">
+    <div id="lobbyEvents">
+      <h3 class="section-title">Lobby Events</h3>
+      <ul id="lobbyEventList"></ul>
+    </div>
+    <div id="lobbyView">
+      <div id="lobbyStatus"></div>
+      <div id="lobbyQr" style="display:none;">
+        <div>GameLobby channel not found. Scan to add:</div>
+        <img src="img/GameLobby.png" alt="GameLobby channel QR code" />
+        <div style="margin-top:6px;">
+          Channel: <code>GameLobby</code><br />
+          PSK: <code>OpLah30Ci9oMvUDbXRGVcw3C55TOgUpQ23fxnYPpq2I=</code>
+        </div>
       </div>
-    </div>
-    <div style="margin-top: 10px;">
-      <button id="announceBtn" disabled>📣 Announce in Lobby</button>
-      <button id="directConnectBtn" type="button">🔗 Direct Connect</button>
-      <span id="seekStatus" style="margin-left:8px;"></span>
-    </div>
-    <div style="margin-top: 10px;">
-      <h3>Games</h3>
-      <button id="seekChessBtn" disabled>Chess</button>
-    </div>
-    <div id="lobbyList">
-      <h3>Players in Lobby</h3>
-      <ul id="lobbyPlayers"></ul>
+      <div style="margin-top: 10px;">
+        <button id="announceBtn" disabled>📣 Announce in Lobby</button>
+        <button id="directConnectBtn" type="button">🔗 Direct Connect</button>
+        <span id="seekStatus" style="margin-left:8px;"></span>
+      </div>
+      <div id="lobbyMain">
+        <div style="margin-top: 10px;">
+          <h3 class="section-title">Games</h3>
+          <button id="seekChessBtn" disabled>Chess</button>
+        </div>
+        <div id="lobbyList">
+          <h3 class="section-title">Players in Lobby</h3>
+          <ul id="lobbyPlayers"></ul>
+        </div>
+      </div>
     </div>
   </div>
 
-  <div id="gameView" style="display:none;">
-    <div id="board"></div>
-    <div id="playerColorStatus"></div>
-    <div id="connectionAlert"></div>
-    <div id="gameStatus"></div>
-    <p><button id="resetBtn">Reset Game</button></p>
-  </div>
+  <div id="gameContainer"></div>
   <p style="margin-top: 20px;">
     <a href="https://github.com/compuvin/chess-meshtastic" target="_blank" rel="noopener" aria-label="GitHub repository" title="GitHub">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 98 96" width="24" height="24" aria-hidden="true">
@@ -100,24 +88,25 @@
 
   <script type="module">
     import { ChessMeshtastic } from "./meshtastic-chess.js";
+    import { createChessUI } from "./games/chess.js";
 
     const $connectionStatus = $('#connectionStatus');
-    const $gameStatus = $('#gameStatus');
-    const $playerColorStatus = $('#playerColorStatus');
-    const $connectionAlert = $('#connectionAlert');
     const $lobbyStatus = $('#lobbyStatus');
     const $lobbyQr = $('#lobbyQr');
     const $announceBtn = $('#announceBtn');
     const $directConnectBtn = $('#directConnectBtn');
     const $seekChessBtn = $('#seekChessBtn');
     const $seekStatus = $('#seekStatus');
+    const $lobbyEventList = $('#lobbyEventList');
+    const $lobbyEvents = $('#lobbyEvents');
     const $lobbyPlayers = $('#lobbyPlayers');
     const $lobbyView = $('#lobbyView');
-    const $gameView = $('#gameView');
+    const $lobbyLayout = $('#lobbyLayout');
+    const $gameContainer = $('#gameContainer');
     const $opponentNodeWrap = $('#opponentNodeWrap');
+    let $gameView = null;
 
-    let board;
-    let game = new Chess();
+    let chessUI = null;
     let gameStarted = false;
     let gameId = null;
     let opponentNodeId = 0x49308818; // set to opponent node id (hex) or leave null for broadcast
@@ -141,6 +130,7 @@
     let seekingTimeoutId = null;
     let pendingInviteNode = null;
     const LOBBY_STALE_MS = 15 * 60 * 1000;
+    const LOBBY_EVENT_LIMIT = 60;
     let directConnectMode = false;
     const knownShortNames = new Map();
     let lobbyChannelTimerId = null;
@@ -154,6 +144,17 @@
     const MOVE_TIMEOUT_MS = 3 * 60 * 1000;
     const RETRY_WAIT_MS = 60 * 1000;
     const RETRY_LIMIT = 5;
+    const lobbyEvents = [];
+    let currentGame = null;
+    const LOBBY_MESSAGE_TYPES = new Set(["L", "G", "I", "A"]);
+
+    function setConnectionStatus(text, state) {
+      $connectionStatus.text(text);
+      $connectionStatus.removeClass('status-connected status-connecting status-error status-disconnected');
+      if (state) {
+        $connectionStatus.addClass(`status-${state}`);
+      }
+    }
 
     const conn = new ChessMeshtastic({
       portnum: 1,
@@ -365,24 +366,63 @@
       console.log("[CHESS TX]", payloadObj);
     }
 
-    // Chessboard config
-    const cbConfig = {
-      draggable: true,
-      position: 'start',
-      onDragStart,
-      onDrop,
-      onSnapEnd,
-      pieceTheme: 'img/chesspieces/wikipedia/{piece}.png'
-    };
-    board = ChessBoard('board', cbConfig);
-    updateStatus();
+    async function loadGame(name) {
+      if (currentGame === name) return;
+      if (currentGame === "chess") {
+        teardownChessGame();
+      }
+      const response = await fetch(`games/${name}.html`);
+      if (!response.ok) {
+        throw new Error(`Failed to load game UI: ${name}`);
+      }
+      $gameContainer.html(await response.text());
+      currentGame = name;
+      if (name === "chess") {
+        initChessGame();
+      }
+    }
+
+    function initChessGame() {
+      $gameView = $('#gameView');
+      chessUI = createChessUI({
+        onLocalMove: (moveUci) => {
+          const payload = { g: gameId, t: "M", d: moveUci };
+          sendMove(payload);
+          moveCount += 1;
+          lastMoveUci = moveUci;
+          scheduleMoveTimeout();
+        },
+        getGameStarted: () => gameStarted,
+        setGameStarted: (val) => { gameStarted = val; },
+        getLocalPlayerColor: () => localPlayerColor,
+        getStartAcked: () => startAcked,
+        isConnected: () => (conn.connected || !!bleConnection),
+        getGameId: () => gameId,
+        onResetGame: () => {
+          moveCount = 0;
+          lastMoveUci = null;
+          clearMoveTimers();
+          clearConnectionAlert();
+        },
+        onReturnLobby: returnToLobby
+      });
+      chessUI.mount();
+    }
+
+    function teardownChessGame() {
+      if (chessUI) {
+        chessUI.unmount();
+      }
+      chessUI = null;
+      $gameView = null;
+    }
 
     async function connectSerial() {
       try {
-        $connectionStatus.text("Status: 🟡 Connecting...");
+        setConnectionStatus("Status: 🟡 Connecting...", "connecting");
         resetLobbyState();
         await conn.connect();
-        $connectionStatus.text("Status: 🟢 Connected & Ready");
+        setConnectionStatus("Status: 🟢 Connected & Ready", "connected");
         $('#connectSerialBtn').prop('disabled', true);
         $('#connectBleBtn').prop('disabled', true);
         $('#disconnectBtn').prop('disabled', false);
@@ -390,7 +430,7 @@
         startLobbyChannelTimer();
       } catch (e) {
         console.error("Connect failed:", e);
-        $connectionStatus.text("Status: 🔴 Connection failed");
+        setConnectionStatus("Status: 🔴 Connection failed", "error");
       }
     }
 
@@ -399,7 +439,7 @@
         if (!window.Meshtastic?.BleConnection || !window.Meshtastic?.Constants) {
           throw new Error("Meshtastic BLE bundle not loaded.");
         }
-        $connectionStatus.text("Status: 🟡 Connecting...");
+        setConnectionStatus("Status: 🟡 Connecting...", "connecting");
         resetLobbyState();
         bleConnection = new window.Meshtastic.BleConnection();
         patchBleConnection(bleConnection);
@@ -426,7 +466,7 @@
           logBleCharacteristicProps(bleConnection);
           await enableBleNotifications(bleConnection);
         }
-        $connectionStatus.text("Status: 🟢 Connected & Ready");
+        setConnectionStatus("Status: 🟢 Connected & Ready", "connected");
         $('#connectSerialBtn').prop('disabled', true);
         $('#connectBleBtn').prop('disabled', true);
         $('#disconnectBtn').prop('disabled', false);
@@ -434,7 +474,7 @@
         startLobbyChannelTimer();
       } catch (e) {
         console.error("Bluetooth connect failed:", e);
-        $connectionStatus.text("Status: 🔴 Connection failed");
+        setConnectionStatus("Status: 🔴 Connection failed", "error");
       }
     }
 
@@ -446,7 +486,7 @@
         bleConnection = null;
       }
       await conn.disconnect();
-      $connectionStatus.text("Status: 🔴 Disconnected");
+      setConnectionStatus("Status: 🔴 Disconnected", "disconnected");
       $('#connectSerialBtn').prop('disabled', false);
       $('#connectBleBtn').prop('disabled', false);
       $('#disconnectBtn').prop('disabled', true);
@@ -464,7 +504,7 @@
       if (!moveMsg || !moveMsg.t) return;
       const packetChannel = rawMsg?.packet?.channel ?? 0;
 
-      if (packetChannel === lobbyChannelIndex) {
+      if (packetChannel === lobbyChannelIndex && LOBBY_MESSAGE_TYPES.has(moveMsg.t)) {
         handleLobbyMessage(moveMsg, rawMsg);
         return;
       }
@@ -488,15 +528,13 @@
       if (moveMsg.t !== "M") return;
       if (moveMsg.g == null || moveMsg.g !== gameId) return;
       console.log("[Game RX] Received move:", moveMsg.d);
-      const move = game.move(moveMsg.d, { sloppy: true });
-      if (move) {
-        board.position(game.fen());
+      const moved = chessUI ? chessUI.applyRemoteMove(moveMsg.d) : false;
+      if (moved) {
         moveCount += 1;
         lastMoveUci = moveMsg.d;
         clearMoveTimers();
         clearConnectionAlert();
       }
-      updateStatus();
     });
 
     async function sendMove(payload) {
@@ -542,6 +580,19 @@
     function formatNodeNum(nodeNum) {
       if (nodeNum == null) return "unknown";
       return `0x${(nodeNum >>> 0).toString(16)}`;
+    }
+
+    function getLobbyDisplayName(nodeNum) {
+      if (nodeNum == null) return "unknown";
+      if (conn.myNodeNum != null && (nodeNum >>> 0) === (conn.myNodeNum >>> 0)) {
+        return getMyLobbyName();
+      }
+      const entry = lobbyPlayers.get(nodeNum);
+      if (entry?.name) return entry.name;
+      for (const [name, num] of knownShortNames.entries()) {
+        if ((num >>> 0) === (nodeNum >>> 0)) return name;
+      }
+      return formatNodeNum(nodeNum);
     }
 
     function resolveNodeId(raw) {
@@ -613,6 +664,7 @@
     }
 
     function resetLobbyState() {
+      restoreLobbyEvents();
       lobbyChannelIndex = null;
       lobbyChannelSeen = false;
       lobbyAnnounced = false;
@@ -620,7 +672,9 @@
       directConnectMode = false;
       $opponentNodeWrap.hide();
       lobbyPlayers.clear();
+      lobbyEvents.length = 0;
       renderLobbyPlayers();
+      renderLobbyEvents();
       stopSeekingChess();
       updateLobbyStatus();
     }
@@ -659,9 +713,35 @@
       }
     }
 
+    function formatLobbyEventTime(ts) {
+      const when = new Date(ts);
+      return when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function renderLobbyEvents() {
+      $lobbyEventList.empty();
+      for (const entry of lobbyEvents) {
+        const $li = $('<li></li>');
+        const $time = $('<span class="time"></span>').text(`[${formatLobbyEventTime(entry.ts)}]`);
+        const $msg = $('<span class="msg"></span>').text(entry.message);
+        $li.append($time, $msg);
+        $lobbyEventList.append($li);
+      }
+    }
+
+    function addLobbyEvent(message) {
+      if (!message) return;
+      lobbyEvents.unshift({ ts: Date.now(), message: String(message) });
+      if (lobbyEvents.length > LOBBY_EVENT_LIMIT) {
+        lobbyEvents.length = LOBBY_EVENT_LIMIT;
+      }
+      renderLobbyEvents();
+    }
+
     function announceLobbyPresence() {
       sendLobbyMessage({ t: "L", n: getMyLobbyName(), id: conn.myNodeNum, m: `${getMyLobbyName()} is in the lobby` });
       upsertLobbyPlayer(conn.myNodeNum, getMyLobbyName());
+      addLobbyEvent(`${getMyLobbyName()} is in the lobby`);
     }
 
     function startSeekingChess() {
@@ -678,6 +758,7 @@
         n: getMyLobbyName(),
         m: `${getMyLobbyName()} would like to play chess`
       });
+      addLobbyEvent(`${getMyLobbyName()} would like to play chess`);
       if (seekingTimeoutId) clearTimeout(seekingTimeoutId);
       seekingTimeoutId = setTimeout(() => {
         seekingChess = false;
@@ -706,13 +787,16 @@
 
       if (msg.t === "L") {
         upsertLobbyPlayer(from, msg.n);
+        addLobbyEvent(msg.m || `${msg.n || formatNodeNum(from)} is in the lobby`);
         return;
       }
 
       if (msg.t === "G" && msg.game === "chess") {
+        addLobbyEvent(msg.m || `${msg.n || formatNodeNum(from)} would like to play chess`);
         if (seekingChess) {
           stopSeekingChess();
           sendLobbyMessage({ t: "A", to: from, game: "chess" });
+          addLobbyEvent(`${getLobbyDisplayName(from)} is playing chess with ${getLobbyDisplayName(conn.myNodeNum)}`);
           startGameWith(from);
         }
         return;
@@ -720,6 +804,7 @@
 
       if (msg.t === "I" && msg.game === "chess" && target != null && target === myNodeNum) {
         sendLobbyMessage({ t: "A", to: from, game: "chess" });
+        addLobbyEvent(`${getLobbyDisplayName(from)} is playing chess with ${getLobbyDisplayName(conn.myNodeNum)}`);
         startGameWith(from);
         return;
       }
@@ -728,23 +813,46 @@
         if (pendingInviteNode === from || seekingChess) {
           stopSeekingChess();
           pendingInviteNode = null;
+          addLobbyEvent(`${getLobbyDisplayName(from)} is playing chess with ${getLobbyDisplayName(conn.myNodeNum)}`);
           startGameWith(from);
         }
       }
     }
 
     function startGameWith(nodeNum) {
+      moveLobbyEventsToGameArea();
       opponentNodeId = nodeNum >>> 0;
       conn.opponentNodeId = opponentNodeId;
       $opponentNodeId.val(formatNodeNum(opponentNodeId));
       stopSeekingChess();
       pendingInviteNode = null;
       $lobbyView.hide();
-      $gameView.show();
-      game = new Chess();
-      board.position('start');
+      if (chessUI) chessUI.showGameView();
+      if (chessUI) chessUI.resetGame();
       resetHandshake();
       startHandshake();
+    }
+
+    function returnToLobby() {
+      restoreLobbyEvents();
+      resetHandshake();
+      if (chessUI) chessUI.resetGame();
+      opponentNodeId = null;
+      conn.opponentNodeId = null;
+      $opponentNodeId.val("");
+      if (chessUI) chessUI.hideGameView();
+      $lobbyView.show();
+      updateLobbyStatus();
+    }
+
+    function moveLobbyEventsToGameArea() {
+      document.body.classList.add('in-game');
+      $lobbyEvents.insertAfter($gameView);
+    }
+
+    function restoreLobbyEvents() {
+      document.body.classList.remove('in-game');
+      $lobbyEvents.prependTo($lobbyLayout);
     }
 
     // -------------------- Handshake --------------------
@@ -764,8 +872,8 @@
       lastMoveUci = null;
       clearMoveTimers();
       clearConnectionAlert();
-      $playerColorStatus.text("");
-      updateStatus();
+      if (chessUI) chessUI.setPlayerColorStatus("");
+      if (chessUI) chessUI.updateStatus();
     }
 
     function startHandshake() {
@@ -778,7 +886,7 @@
       mySeed = (Math.random() * 0xffffffff) >>> 0;
       sendMove({ t: "H", s: mySeed });
       startHandshakeRetryLoop();
-      updateStatus();
+      if (chessUI) chessUI.updateStatus();
     }
 
     function handleHandshake(msg) {
@@ -802,12 +910,12 @@
 
       iAmStarter = iAmWhite;
       localPlayerColor = iAmWhite ? 'w' : 'b';
-      $playerColorStatus.text(`You are ${iAmWhite ? 'White' : 'Black'}.`);
+      if (chessUI) chessUI.setPlayerColorStatus(`You are ${iAmWhite ? 'White' : 'Black'}.`);
 
       if (seedDiff >= 0 && !awaitingStart) {
         startGameIdAnnouncement();
       }
-      updateStatus();
+      if (chessUI) chessUI.updateStatus();
     }
 
     function startGameIdAnnouncement() {
@@ -843,11 +951,15 @@
       sendMove({ t: "K", g: gameId });
       if (iAmStarter === false) {
         startAcked = true;
+        if (localPlayerColor == null) {
+          localPlayerColor = 'b';
+          if (chessUI) chessUI.setPlayerColorStatus("You are Black.");
+        }
       }
       if (iAmStarter === false) {
         stopHandshakeRetryLoop();
       }
-      updateStatus();
+      if (chessUI) chessUI.updateStatus();
     }
 
     function handleStartAck(msg) {
@@ -855,7 +967,7 @@
       const ackGameId = msg.g >>> 0;
       if (gameId == null || ackGameId !== gameId) return;
       startAcked = true;
-      updateStatus();
+      if (chessUI) chessUI.updateStatus();
       if (iAmStarter === true) {
         stopHandshakeRetryLoop();
       }
@@ -964,90 +1076,40 @@
     }
 
     function showConnectionAlert(text) {
-      $connectionAlert.text(text);
+      if (chessUI) chessUI.showConnectionAlert(text);
     }
 
     function clearConnectionAlert() {
-      $connectionAlert.text("");
+      if (chessUI) chessUI.clearConnectionAlert();
     }
 
     // -------------------- Chess Events --------------------
-    function onDragStart(source, piece) {
-      if (game.game_over() || !gameStarted || (!conn.connected && !bleConnection)) return false;
-      if (localPlayerColor == null) return false;
-      if (localPlayerColor === 'w' && !startAcked) return false;
-      if (game.turn() !== localPlayerColor) return false;
-      if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
-          (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
-        return false;
-      }
-    }
-
-    function onDrop(source, target) {
-      const temp = { from: source, to: target, promotion: 'q' };
-      const move = game.move(temp);
-      if (!move) return 'snapback';
-
-      const moveUCI = move.from + move.to + (move.promotion ? move.promotion : '');
-      const payload = { g: gameId, t: "M", d: moveUCI };
-      sendMove(payload);
-      moveCount += 1;
-      lastMoveUci = moveUCI;
-      scheduleMoveTimeout();
-      updateStatus();
-    }
-
-    function onSnapEnd() { board.position(game.fen()); }
-
-    function updateStatus() {
-      let status = '';
-      const moveColor = (game.turn() === 'b') ? 'Black' : 'White';
-      if (game.game_over()) {
-        gameStarted = false;
-        status = game.in_checkmate() ? `Game over, ${moveColor} is in checkmate.` : 'Game over, drawn position.';
-      } else if (!gameStarted) {
-        status = 'Waiting for handshake...';
-      } else {
-        status = moveColor + ' to move.';
-        if (game.in_check()) status += ' (Check!)';
-      }
-      $gameStatus.text(status);
-    }
-
-    function resetGame() {
-      game = new Chess();
-      board.position('start');
-      if (gameId != null) {
-        gameStarted = true;
-      }
-      moveCount = 0;
-      lastMoveUci = null;
-      clearMoveTimers();
-      clearConnectionAlert();
-      updateStatus();
-    }
 
     // -------------------- Event Binding --------------------
-    $('#connectSerialBtn').on('click', connectSerial);
-    $('#connectBleBtn').on('click', connectBluetooth);
-    $('#disconnectBtn').on('click', disconnect);
-    $('#resetBtn').on('click', resetGame);
-    $directConnectBtn.on('click', () => {
-      directConnectMode = !directConnectMode;
-      if (directConnectMode) {
-        $opponentNodeWrap.show();
-        $seekStatus.text("Enter a node ID, then click Chess to start.");
-        updateLobbyStatus();
-      } else {
-        $opponentNodeWrap.hide();
-        $seekStatus.text("");
-        updateLobbyStatus();
-      }
-    });
-    $announceBtn.on('click', announceLobbyPresence);
-    $seekChessBtn.on('click', startSeekingChess);
-    updateLobbyStatus();
-    updateStatus();
+    async function initApp() {
+      await loadGame('chess');
+      $('#connectSerialBtn').on('click', connectSerial);
+      $('#connectBleBtn').on('click', connectBluetooth);
+      $('#disconnectBtn').on('click', disconnect);
+      $directConnectBtn.on('click', () => {
+        directConnectMode = !directConnectMode;
+        if (directConnectMode) {
+          $opponentNodeWrap.show();
+          $seekStatus.text("Enter a node ID, then click Chess to start.");
+          updateLobbyStatus();
+        } else {
+          $opponentNodeWrap.hide();
+          $seekStatus.text("");
+          updateLobbyStatus();
+        }
+      });
+      $announceBtn.on('click', announceLobbyPresence);
+      $seekChessBtn.on('click', startSeekingChess);
+      updateLobbyStatus();
+      if (chessUI) chessUI.updateStatus();
+    }
+
+    initApp().catch((err) => console.error("Init failed:", err));
   </script>
 </body>
 </html>
