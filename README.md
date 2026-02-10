@@ -7,8 +7,11 @@ This project is mostly vibe coded.
 
 [Play now](https://kb1jdx.com/chess-meshtastic/)
 
+[Buy me a coffee](https://buymeacoffee.com/compuvin)
+
 [![Meshtastic](https://img.shields.io/badge/mesh-meshtastic-0b8a5a?style=flat)](https://meshtastic.org)
 [![Web Serial](https://img.shields.io/badge/web-serial-3367d6?style=flat)](https://developer.mozilla.org/en-US/docs/Web/API/Serial)
+[![Web Bluetooth](https://img.shields.io/badge/web-bluetooth-5a67d8?style=flat)](https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API)
 [![Status](https://img.shields.io/badge/status-experimental-f39c12?style=flat)](#)
 
 ## Why it is fun
@@ -21,7 +24,7 @@ This project is mostly vibe coded.
 - Lobby channel with matchmaking and direct connect fallback
 - Random handshake to pick colors and a shared game ID
 - Move-count sync and reconnect checks
-- Simple, single-page UI
+- Single-page app with modular game views (loaded at runtime)
 
 ## Requirements
 - A browser with Web Serial or Web Bluetooth support (Chromium-based)
@@ -41,7 +44,11 @@ This project is mostly vibe coded.
 - If a move is missing, the app uses move counts to retry and resync.
 
 ## Files
-- `index.html`: UI and game logic
+- `index.html`: Lobby, connection, and game loader
+- `games/chess.html`: Chess UI fragment (loaded into the page)
+- `games/chess.js`: Chess UI logic (board, moves, status)
+- `games/`: Game view fragments and modules
+- `lobby.css`: App styling
 - `meshtastic-chess.js`: Serial framing + Meshtastic protobuf handling
 - `meshtastic_bundle.json`: Protobuf schema bundle
 - `vendor/protobuf.min.js`: Protobuf runtime
@@ -53,6 +60,7 @@ This project is mostly vibe coded.
 - The opponent node ID can be entered as `0x...`, `!...`, or decimal.
 - If you need to reset a game, use **Reset Game**.
 - This is a lightweight experimental project, not a full client.
+- To add a new game, create `games/<name>.html` (UI fragment) and `games/<name>.js` (UI logic), then register it in the loader.
 - Lobby channel details:
   - Name: `GameLobby`
   - PSK: `OpLah30Ci9oMvUDbXRGVcw3C55TOgUpQ23fxnYPpq2I=`
