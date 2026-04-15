@@ -55,6 +55,7 @@ This project is mostly vibe coded.
 - `js/meshtastic.bundle.js`: @meshtastic/js bundle (BLE)
 - `js/meshtastic.js`: bundle loader
 - `img/GameLobby.png`: QR code for the lobby channel
+- Chess pieces render as inline SVGs using Unicode chess glyphs, so no local piece PNG set is required
 
 ## Notes
 - The opponent node ID can be entered as `0x...`, `!...`, or decimal.

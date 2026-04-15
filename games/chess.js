@@ -16,6 +16,50 @@ export function createChessUI(options) {
   let $gameStatus = null;
   let $playerColorStatus = null;
   let $connectionAlert = null;
+  const inlinePieceCache = new Map();
+
+  function getInlinePieceSvg(piece) {
+    const pieceGlyphs = {
+      wK: '\u2654',
+      wQ: '\u2655',
+      wR: '\u2656',
+      wB: '\u2657',
+      wN: '\u2658',
+      wP: '\u2659',
+      bK: '\u265A',
+      bQ: '\u265B',
+      bR: '\u265C',
+      bB: '\u265D',
+      bN: '\u265E',
+      bP: '\u265F'
+    };
+
+    if (inlinePieceCache.has(piece)) {
+      return inlinePieceCache.get(piece);
+    }
+
+    const glyph = pieceGlyphs[piece];
+    if (!glyph) return '';
+
+    const svg = [
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
+      '<rect width="100" height="100" fill="transparent"/>',
+      '<text',
+      ' x="50"',
+      ' y="54"',
+      ' text-anchor="middle"',
+      ' dominant-baseline="middle"',
+      ' font-size="78"',
+      ' font-family="Segoe UI Symbol, Noto Sans Symbols 2, Noto Sans Symbols, DejaVu Sans, Symbola, serif">',
+      glyph,
+      '</text>',
+      '</svg>'
+    ].join('');
+
+    const url = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+    inlinePieceCache.set(piece, url);
+    return url;
+  }
 
   function onDragStart(source, piece) {
     if (game.game_over() || (!getGameStarted() && getGameId() == null) || !isConnected()) return false;
@@ -48,7 +92,7 @@ export function createChessUI(options) {
     onDragStart,
     onDrop,
     onSnapEnd,
-    pieceTheme: 'img/chesspieces/wikipedia/{piece}.png'
+    pieceTheme: getInlinePieceSvg
   };
 
   function mount() {
