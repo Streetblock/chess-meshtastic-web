@@ -54,7 +54,7 @@ This project is mostly vibe coded.
 - `vendor/protobuf.min.js`: Protobuf runtime
 - `js/meshtastic.bundle.js`: @meshtastic/js bundle (BLE)
 - `js/meshtastic.js`: bundle loader
-- `img/GameLobby.png`: QR code for the lobby channel
+- The lobby invite link and QR code are generated at runtime from the GameLobby channel config
 - Chess pieces render as inline SVGs using Unicode chess glyphs, so no local piece PNG set is required
 
 ## Notes
@@ -66,13 +66,32 @@ This project is mostly vibe coded.
   - Name: `GameLobby`
   - PSK: `OpLah30Ci9oMvUDbXRGVcw3C55TOgUpQ23fxnYPpq2I=`
   - Recommended to add it before playing for smooth matchmaking.
-  - QR code: `img/GameLobby.png`
+  - Invite link and QR code are generated in the app from the channel config using `protobuf` and `bwip-js`.
 - Licensing: the app uses the original third-party sources by default.
   If you want offline copies, download these into `lib/`:
   - https://code.jquery.com/jquery-1.12.4.min.js
   - https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js
   - https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js
   - https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css
+  - https://cdn.jsdelivr.net/npm/bwip-js@4.8.0/dist/bwip-js.min.js
+  Windows PowerShell:
+  ```powershell
+  New-Item -ItemType Directory -Force -Path lib | Out-Null
+  Invoke-WebRequest -Uri "https://code.jquery.com/jquery-1.12.4.min.js" -OutFile "lib/jquery-1.12.4.min.js"
+  Invoke-WebRequest -Uri "https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js" -OutFile "lib/chess.min.js"
+  Invoke-WebRequest -Uri "https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js" -OutFile "lib/chessboard-1.0.0.min.js"
+  Invoke-WebRequest -Uri "https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css" -OutFile "lib/chessboard-1.0.0.min.css"
+  Invoke-WebRequest -Uri "https://cdn.jsdelivr.net/npm/bwip-js@4.8.0/dist/bwip-js.min.js" -OutFile "lib/bwip-js.min.js"
+  ```
+  Linux/macOS shell:
+  ```bash
+  mkdir -p lib
+  curl -L "https://code.jquery.com/jquery-1.12.4.min.js" -o "lib/jquery-1.12.4.min.js"
+  curl -L "https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js" -o "lib/chess.min.js"
+  curl -L "https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js" -o "lib/chessboard-1.0.0.min.js"
+  curl -L "https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css" -o "lib/chessboard-1.0.0.min.css"
+  curl -L "https://cdn.jsdelivr.net/npm/bwip-js@4.8.0/dist/bwip-js.min.js" -o "lib/bwip-js.min.js"
+  ```
 
 ## Troubleshooting
 - If the handshake never completes, confirm both radios are on the same channel

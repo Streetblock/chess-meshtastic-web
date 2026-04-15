@@ -44,11 +44,18 @@
       <div id="lobbyStatus"></div>
       <div id="lobbyQr" style="display:none;">
         <div>GameLobby channel not found. Scan to add:</div>
-        <img src="img/GameLobby.png" alt="GameLobby channel QR code" />
+        <canvas id="lobbyQrCanvas" width="220" height="220" aria-label="GameLobby channel QR code"></canvas>
         <div style="margin-top:6px;">
           Channel: <code>GameLobby</code><br />
           PSK: <code>OpLah30Ci9oMvUDbXRGVcw3C55TOgUpQ23fxnYPpq2I=</code>
         </div>
+        <div class="invite-link-row">
+          <input id="lobbyQrLink" type="text" readonly aria-label="GameLobby invite link" />
+          <button id="copyLobbyQrLinkBtn" type="button">Copy Link</button>
+        </div>
+        <p id="lobbyQrHint" class="invite-hint">
+          If the QR renderer is unavailable, open or copy the Meshtastic invite link directly.
+        </p>
       </div>
       <div style="margin-top: 10px;">
         <button id="announceBtn" disabled>📣 Announce in Lobby</button>
@@ -80,6 +87,7 @@
   <script src="lib/jquery-1.12.4.min.js" onerror="loadCdnScript('https://code.jquery.com/jquery-1.12.4.min.js', this)"></script>
   <script src="lib/chess.min.js" onerror="loadCdnScript('https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js', this)"></script>
   <script src="lib/chessboard-1.0.0.min.js" onerror="loadCdnScript('https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js', this)"></script>
+  <script src="lib/bwip-js.min.js" onerror="loadCdnScript('https://cdn.jsdelivr.net/npm/bwip-js@4.8.0/dist/bwip-js.min.js', this)"></script>
   <script type="module">
     import * as Meshtastic from "./js/meshtastic.js?v=2";
     window.Meshtastic = Meshtastic;
@@ -122,12 +130,143 @@
     const HANDSHAKE_RETRY_INTERVAL_MS = 30 * 1000;
     const HANDSHAKE_RETRY_LIMIT = 6;
     const LOBBY_CHANNEL_NAME = "GameLobby";
+    const LOBBY_CHANNEL_PSK = "OpLah30Ci9oMvUDbXRGVcw3C55TOgUpQ23fxnYPpq2I=";
+    const LOBBY_MODEM_PRESET = "LONG_FAST";
+    const APP_ONLY_PROTO = `
+      syntax = "proto3";
+      message AppOnly {
+        repeated Channel channels = 1;
+        LoRaConfig lora = 2;
+      }
+      message Channel {
+        int32 index = 1;
+        ChannelSettings settings = 2;
+        Role role = 3;
+        enum Role { DISABLED = 0; PRIMARY = 1; SECONDARY = 2; }
+      }
+      message ChannelSettings {
+        bytes psk = 4;
+        string name = 5;
+      }
+      message LoRaConfig {
+        bool use_preset = 1;
+        ModemPreset modem_preset = 13;
+        enum ModemPreset {
+          LONG_FAST = 0; LONG_SLOW = 1; VERY_LONG_SLOW = 2; MEDIUM_SLOW = 3;
+          MEDIUM_FAST = 4; SHORT_SLOW = 5; SHORT_FAST = 6; LONG_MODERATE = 7; SHORT_TURBO = 8;
+        }
+      }
+    `;
     let lobbyChannelIndex = null;
     let lobbyChannelSeen = false;
     const lobbyPlayers = new Map();
     let lobbyAnnounced = false;
     let seekingChess = false;
     let seekingTimeoutId = null;
+    const $lobbyQrCanvas = $('#lobbyQrCanvas');
+    const $lobbyQrLink = $('#lobbyQrLink');
+    const $copyLobbyQrLinkBtn = $('#copyLobbyQrLinkBtn');
+    let appOnlyType = null;
+
+    function initAppOnlyType() {
+      if (appOnlyType || !window.protobuf) return appOnlyType;
+      try {
+        appOnlyType = window.protobuf.parse(APP_ONLY_PROTO).root.lookupType("AppOnly");
+      } catch (err) {
+        console.warn("[QR] Failed to initialize AppOnly protobuf", err);
+      }
+      return appOnlyType;
+    }
+
+    function decodeBase64ToBytes(base64) {
+      let clean = String(base64 || '').trim().replace(/-/g, '+').replace(/_/g, '/');
+      while (clean.length % 4) clean += '=';
+      const decoded = atob(clean);
+      return new Uint8Array(decoded.split('').map(c => c.charCodeAt(0)));
+    }
+
+    function encodeBytesToBase64Url(bytes) {
+      return btoa(String.fromCharCode(...bytes))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    }
+
+    function buildLobbyInviteLink() {
+      const AppOnly = initAppOnlyType();
+      if (!AppOnly) return '';
+      const presetMap = {
+        LONG_FAST: 0,
+        LONG_SLOW: 1,
+        VERY_LONG_SLOW: 2,
+        MEDIUM_SLOW: 3,
+        MEDIUM_FAST: 4,
+        SHORT_SLOW: 5,
+        SHORT_FAST: 6,
+        LONG_MODERATE: 7,
+        SHORT_TURBO: 8
+      };
+
+      try {
+        const payload = {
+          channels: [{
+            index: 0,
+            role: 2,
+            settings: {
+              name: LOBBY_CHANNEL_NAME,
+              psk: decodeBase64ToBytes(LOBBY_CHANNEL_PSK)
+            }
+          }],
+          lora: {
+            usePreset: true,
+            modemPreset: presetMap[LOBBY_MODEM_PRESET]
+          }
+        };
+
+        const errMsg = AppOnly.verify(payload);
+        if (errMsg) throw new Error(errMsg);
+        const message = AppOnly.create(payload);
+        const buffer = AppOnly.encode(message).finish();
+        return `https://meshtastic.org/e/?add=true#${encodeBytesToBase64Url(buffer)}`;
+      } catch (err) {
+        console.warn("[QR] Failed to build GameLobby invite link", err);
+        return '';
+      }
+    }
+
+    function renderLobbyQr() {
+      const inviteLink = buildLobbyInviteLink();
+      $lobbyQrLink.val(inviteLink);
+      if (!inviteLink) {
+        return;
+      }
+      if (!window.bwipjs || !$lobbyQrCanvas.length) return;
+
+      try {
+        window.bwipjs.toCanvas($lobbyQrCanvas[0], {
+          bcid: 'qrcode',
+          text: inviteLink,
+          scale: 5,
+          padding: 2,
+          eclevel: 'M',
+          backgroundcolor: 'FFFFFF'
+        });
+      } catch (err) {
+        console.warn("[QR] Failed to render GameLobby QR", err);
+      }
+    }
+
+    async function copyLobbyInviteLink() {
+      const inviteLink = $lobbyQrLink.val();
+      if (!inviteLink) return;
+      try {
+        await navigator.clipboard.writeText(inviteLink);
+        $copyLobbyQrLinkBtn.text('Copied');
+        window.setTimeout(() => $copyLobbyQrLinkBtn.text('Copy Link'), 1200);
+      } catch (err) {
+        console.warn("[QR] Clipboard write failed", err);
+      }
+    }
     let pendingInviteNode = null;
     const LOBBY_STALE_MS = 15 * 60 * 1000;
     const LOBBY_EVENT_LIMIT = 60;
@@ -659,6 +798,7 @@
       $announceBtn.prop('disabled', true);
       $seekChessBtn.prop('disabled', !directConnectMode);
       if (lobbyChannelSeen) {
+        renderLobbyQr();
         $lobbyQr.show();
       }
     }
@@ -1091,6 +1231,7 @@
       $('#connectSerialBtn').on('click', connectSerial);
       $('#connectBleBtn').on('click', connectBluetooth);
       $('#disconnectBtn').on('click', disconnect);
+      $copyLobbyQrLinkBtn.on('click', copyLobbyInviteLink);
       $directConnectBtn.on('click', () => {
         directConnectMode = !directConnectMode;
         if (directConnectMode) {
@@ -1105,6 +1246,7 @@
       });
       $announceBtn.on('click', announceLobbyPresence);
       $seekChessBtn.on('click', startSeekingChess);
+      renderLobbyQr();
       updateLobbyStatus();
       if (chessUI) chessUI.updateStatus();
     }

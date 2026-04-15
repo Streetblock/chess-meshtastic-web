@@ -88,7 +88,33 @@ h3 { margin: 0 0 8px; font-size: 1.05em; color: var(--ink); }
 #lobbyEvents li { padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 0.95em; }
 #lobbyEvents .time { color: var(--muted); margin-right: 6px; }
 #lobbyQr { margin-top: 12px; text-align: center; }
-#lobbyQr img { width: 220px; height: 220px; border-radius: 10px; box-shadow: 0 6px 16px rgba(0,0,0,0.15); }
+#lobbyQr canvas {
+  width: 220px;
+  height: 220px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+}
+.invite-link-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+}
+.invite-link-row input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fff;
+  color: var(--ink);
+}
+.invite-hint {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.9em;
+}
 button {
   margin: 0 6px;
   border: 1px solid var(--border);
