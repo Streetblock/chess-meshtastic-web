@@ -97,6 +97,12 @@
   <script type="module">
     import { ChessMeshtastic } from "./meshtastic-chess.js";
     import { createChessUI } from "./games/chess.js";
+    import {
+      createPv2Context,
+      isPv2Message,
+      validatePv2Message,
+      isReplayOrOutOfOrder
+    } from "./protocol/pv2.js";
 
     const $connectionStatus = $('#connectionStatus');
     const $lobbyStatus = $('#lobbyStatus');
@@ -115,6 +121,7 @@
     let $gameView = null;
 
     let chessUI = null;
+    const pv2 = createPv2Context();
     let gameStarted = false;
     let gameId = null;
     let opponentNodeId = 0x49308818; // set to opponent node id (hex) or leave null for broadcast
@@ -641,6 +648,20 @@
     // -------------------- Sending & Receiving Messages --------------------
     conn.onMove((moveMsg, rawMsg) => {
       if (!moveMsg || !moveMsg.t) return;
+      if (isPv2Message(moveMsg)) {
+        const fromNode = rawMsg?.packet?.from ?? null;
+        const validation = validatePv2Message(moveMsg);
+        if (!validation.ok) {
+          console.warn("[PV2] Invalid message ignored:", validation.reason, moveMsg);
+          return;
+        }
+        if (isReplayOrOutOfOrder(pv2, moveMsg, fromNode)) {
+          console.warn("[PV2] Replay or out-of-order message ignored:", moveMsg);
+          return;
+        }
+        console.log("[PV2 RX]", moveMsg);
+        return;
+      }
       const packetChannel = rawMsg?.packet?.channel ?? 0;
 
       if (packetChannel === lobbyChannelIndex && LOBBY_MESSAGE_TYPES.has(moveMsg.t)) {
