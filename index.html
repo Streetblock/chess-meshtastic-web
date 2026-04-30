@@ -1333,6 +1333,49 @@
       gameStarted = true;
     }
 
+    function ensureGameId(incomingGameId) {
+      const normalizedGameId = incomingGameId >>> 0;
+      if (gameId == null || gameId !== normalizedGameId) {
+        if (gameId != null && gameId !== normalizedGameId) {
+          console.warn("Overriding game id:", gameId, "->", normalizedGameId);
+        }
+        gameId = normalizedGameId;
+        conn.gameId = gameId;
+      }
+      return gameId;
+    }
+
+    function applyIncomingStartState(incomingGameId) {
+      const normalizedGameId = ensureGameId(incomingGameId);
+      if (iAmStarter == null) {
+        iAmStarter = false;
+      }
+      startReceived = true;
+      gameStarted = true;
+      awaitingStart = true;
+      if (iAmStarter === false) {
+        startAcked = true;
+        if (localPlayerColor == null) {
+          localPlayerColor = 'b';
+          if (chessUI) chessUI.setPlayerColorStatus("You are Black.");
+        }
+        stopHandshakeRetryLoop();
+      }
+      if (chessUI) chessUI.updateStatus();
+      return normalizedGameId;
+    }
+
+    function applyIncomingStartAckState(incomingGameId) {
+      const normalizedGameId = incomingGameId >>> 0;
+      if (gameId == null || normalizedGameId !== gameId) return false;
+      startAcked = true;
+      if (chessUI) chessUI.updateStatus();
+      if (iAmStarter === true) {
+        stopHandshakeRetryLoop();
+      }
+      return true;
+    }
+
     function handleStart(msg) {
       if (typeof msg.g !== 'number') return;
       const incomingGameId = msg.g >>> 0;
@@ -1340,42 +1383,13 @@
         console.warn("Ignoring start for different game id:", incomingGameId, "current:", gameId);
         return;
       }
-      if (gameId == null || gameId !== incomingGameId) {
-        if (gameId != null && gameId !== incomingGameId) {
-          console.warn("Overriding game id:", gameId, "->", incomingGameId);
-        }
-        gameId = incomingGameId;
-        conn.gameId = gameId;
-      }
-      if (iAmStarter == null) {
-        iAmStarter = false;
-      }
-      startReceived = true;
-      gameStarted = true;
-      awaitingStart = true;
-      sendMove({ t: "K", g: gameId });
-      if (iAmStarter === false) {
-        startAcked = true;
-        if (localPlayerColor == null) {
-          localPlayerColor = 'b';
-          if (chessUI) chessUI.setPlayerColorStatus("You are Black.");
-        }
-      }
-      if (iAmStarter === false) {
-        stopHandshakeRetryLoop();
-      }
-      if (chessUI) chessUI.updateStatus();
+      const acceptedGameId = applyIncomingStartState(incomingGameId);
+      sendMove({ t: "K", g: acceptedGameId });
     }
 
     function handleStartAck(msg) {
       if (typeof msg.g !== 'number') return;
-      const ackGameId = msg.g >>> 0;
-      if (gameId == null || ackGameId !== gameId) return;
-      startAcked = true;
-      if (chessUI) chessUI.updateStatus();
-      if (iAmStarter === true) {
-        stopHandshakeRetryLoop();
-      }
+      applyIncomingStartAckState(msg.g);
     }
 
     function startHandshakeRetryLoop() {
