@@ -104,7 +104,14 @@
       validatePv2Message,
       isReplayOrOutOfOrder,
       buildHelloMessage,
-      applyRemoteHello
+      applyRemoteHello,
+      canUseCommitReveal,
+      beginCommitRound,
+      applyRemoteCommit,
+      shouldSendReveal,
+      buildRevealMessage,
+      applyRemoteReveal,
+      isCommitRoundReady
     } from "./protocol/pv2.js";
 
     const $connectionStatus = $('#connectionStatus');
@@ -661,7 +668,18 @@
       console.log("[PV2 TX]", hello);
     }
 
-    function handlePv2Message(moveMsg, rawMsg) {
+    async function maybeSendPv2Reveal() {
+      if (!shouldSendReveal(pv2)) return;
+      try {
+        const reveal = buildRevealMessage(pv2);
+        await sendMove(reveal);
+        console.log("[PV2 TX]", reveal);
+      } catch (err) {
+        console.warn("[PV2] REVEAL send failed", err);
+      }
+    }
+
+    async function handlePv2Message(moveMsg, rawMsg) {
       const fromNode = rawMsg?.packet?.from ?? null;
       const validation = validatePv2Message(moveMsg);
       if (!validation.ok) {
@@ -681,6 +699,31 @@
         return true;
       }
 
+      if (moveMsg.t === 'COMMIT') {
+        const applied = applyRemoteCommit(pv2, moveMsg);
+        if (!applied.ok) {
+          console.warn("[PV2] COMMIT rejected:", applied.reason, moveMsg);
+          return true;
+        }
+        console.log("[PV2 RX] COMMIT accepted");
+        await maybeSendPv2Reveal();
+        return true;
+      }
+
+      if (moveMsg.t === 'REVEAL') {
+        const applied = await applyRemoteReveal(pv2, moveMsg);
+        if (!applied.ok) {
+          console.warn("[PV2] REVEAL rejected:", applied.reason, moveMsg);
+          return true;
+        }
+        console.log("[PV2 RX] REVEAL accepted");
+        if (isCommitRoundReady(pv2)) {
+          pv2.state = 'commit-ready';
+          console.log("[PV2] Commit round ready");
+        }
+        return true;
+      }
+
       console.log("[PV2 RX]", moveMsg);
       return true;
     }
@@ -688,7 +731,9 @@
     conn.onMove((moveMsg, rawMsg) => {
       if (!moveMsg || !moveMsg.t) return;
       if (isPv2Message(moveMsg)) {
-        handlePv2Message(moveMsg, rawMsg);
+        handlePv2Message(moveMsg, rawMsg).catch((err) => {
+          console.warn("[PV2] Handler error", err);
+        });
         return;
       }
       const packetChannel = rawMsg?.packet?.channel ?? 0;
@@ -1049,6 +1094,10 @@
     function resetHandshake() {
       mySeed = null;
       opponentSeed = null;
+      pv2.commitRound = null;
+      if (pv2.enabled) {
+        pv2.state = 'hello-received';
+      }
       gameId = null;
       conn.gameId = null;
       gameStarted = false;
@@ -1072,6 +1121,23 @@
         console.warn("Opponent node id required to start.");
         return;
       }
+      if (canUseCommitReveal(pv2)) {
+        beginCommitRound(pv2).then((commitMsg) => {
+          sendMove(commitMsg)
+            .then(() => {
+              console.log("[PV2 TX]", commitMsg);
+            })
+            .then(() => maybeSendPv2Reveal());
+        }).catch((err) => {
+          console.warn("[PV2] Commit round start failed, fallback to pv1", err);
+          startClassicHandshake();
+        });
+        return;
+      }
+      startClassicHandshake();
+    }
+
+    function startClassicHandshake() {
       if (mySeed != null) return;
       mySeed = (Math.random() * 0xffffffff) >>> 0;
       sendMove({ t: "H", s: mySeed });
