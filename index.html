@@ -693,6 +693,10 @@
       return pv2.auth.enabled;
     }
 
+    function shouldMirrorLegacyGameMessages() {
+      return shouldUsePv2GameMessages() && !pv2.remoteCaps.includes('hmac');
+    }
+
     async function sendGameMoveUci(moveUci) {
       if (shouldUsePv2GameMessages()) {
         const moveMsg = buildMoveMessage(pv2, {
@@ -700,7 +704,24 @@
           uci: moveUci,
           ply: moveCount + 1
         });
-        return sendPv2Message(moveMsg);
+        if (!shouldMirrorLegacyGameMessages()) {
+          return sendPv2Message(moveMsg);
+        }
+        const legacyMsg = { g: gameId, t: "M", d: moveUci };
+        const [pv2Result, legacyResult] = await Promise.allSettled([
+          sendPv2Message(moveMsg),
+          sendMove(legacyMsg)
+        ]);
+        if (pv2Result.status === 'rejected') {
+          console.warn("[PV2.1] MOVE send failed, mirrored legacy attempted", pv2Result.reason);
+        }
+        if (legacyResult.status === 'rejected') {
+          console.warn("[PV2.1] Legacy MOVE mirror failed", legacyResult.reason);
+        }
+        if (pv2Result.status === 'rejected' && legacyResult.status === 'rejected') {
+          throw pv2Result.reason || legacyResult.reason || new Error("MOVE send failed");
+        }
+        return;
       }
       return sendMove({ g: gameId, t: "M", d: moveUci });
     }
@@ -712,7 +733,24 @@
           moveCount,
           reply: isReply
         });
-        return sendPv2Message(syncMsg);
+        if (!shouldMirrorLegacyGameMessages()) {
+          return sendPv2Message(syncMsg);
+        }
+        const legacyMsg = { t: "C", g: gameId, c: moveCount, r: isReply };
+        const [pv2Result, legacyResult] = await Promise.allSettled([
+          sendPv2Message(syncMsg),
+          sendMove(legacyMsg)
+        ]);
+        if (pv2Result.status === 'rejected') {
+          console.warn("[PV2.1] SYNC send failed, mirrored legacy attempted", pv2Result.reason);
+        }
+        if (legacyResult.status === 'rejected') {
+          console.warn("[PV2.1] Legacy SYNC mirror failed", legacyResult.reason);
+        }
+        if (pv2Result.status === 'rejected' && legacyResult.status === 'rejected') {
+          throw pv2Result.reason || legacyResult.reason || new Error("SYNC send failed");
+        }
+        return;
       }
       return sendMove({ t: "C", g: gameId, c: moveCount, r: isReply });
     }
