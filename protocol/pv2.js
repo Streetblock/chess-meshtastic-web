@@ -55,6 +55,48 @@ function concatBytes(...chunks) {
   return out;
 }
 
+function sortObjectKeys(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => sortObjectKeys(item));
+  }
+  if (!value || typeof value !== 'object') return value;
+  const keys = Object.keys(value).sort();
+  const out = {};
+  for (const key of keys) {
+    out[key] = sortObjectKeys(value[key]);
+  }
+  return out;
+}
+
+export function canonicalizeForMac(message) {
+  const clone = { ...message };
+  delete clone.mac;
+  return JSON.stringify(sortObjectKeys(clone));
+}
+
+async function importHmacKey(rawKey) {
+  return crypto.subtle.importKey(
+    'raw',
+    rawKey,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
+}
+
+export async function computeMessageMac(rawKeyBytes, message) {
+  const key = await importHmacKey(rawKeyBytes);
+  const canonical = canonicalizeForMac(message);
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(canonical));
+  return bytesToHex(new Uint8Array(sig));
+}
+
+export async function verifyMessageMac(rawKeyBytes, message) {
+  if (!message || typeof message.mac !== 'string' || message.mac.length < 16) return false;
+  const expected = await computeMessageMac(rawKeyBytes, message);
+  return expected === message.mac;
+}
+
 export function createPv2Context() {
   return {
     enabled: false,
@@ -66,7 +108,11 @@ export function createPv2Context() {
     peerSeqByNode: new Map(),
     state: 'idle',
     commitRound: null,
-    startProposal: null
+    startProposal: null,
+    auth: {
+      enabled: false,
+      keyBytes: null
+    }
   };
 }
 
@@ -79,6 +125,10 @@ export function resetPv2Context(ctx) {
   ctx.state = 'idle';
   ctx.commitRound = null;
   ctx.startProposal = null;
+  ctx.auth = {
+    enabled: false,
+    keyBytes: null
+  };
 }
 
 export function nextPv2Seq(ctx) {
@@ -91,7 +141,7 @@ export function buildPv2Envelope(ctx, type, body = {}) {
   if (!ALLOWED_TYPES.has(type)) {
     throw new Error(`Unsupported pv2 type: ${type}`);
   }
-  return {
+  const envelope = {
     pv: PV2,
     t: type,
     sid: ctx.sid,
@@ -99,6 +149,10 @@ export function buildPv2Envelope(ctx, type, body = {}) {
     ts: Date.now(),
     ...body
   };
+  if (ctx.auth.enabled) {
+    envelope.mac = body.mac || '';
+  }
+  return envelope;
 }
 
 export function isPv2Message(msg) {
