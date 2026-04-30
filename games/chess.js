@@ -1,3 +1,35 @@
+import { createGameEngine } from "./engine/chess-engine.js";
+
+const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
+const PIECES = {
+  wK: "\u2654", wQ: "\u2655", wR: "\u2656", wB: "\u2657", wN: "\u2658", wP: "\u2659",
+  bK: "\u265A", bQ: "\u265B", bR: "\u265C", bB: "\u265D", bN: "\u265E", bP: "\u265F"
+};
+
+function fenToBoardMap(fen) {
+  const board = new Map();
+  const placement = String(fen || "").split(/\s+/)[0];
+  const ranks = placement.split("/");
+  for (let row = 0; row < 8; row += 1) {
+    let col = 0;
+    for (const ch of ranks[row] || "") {
+      if (/\d/.test(ch)) {
+        col += Number(ch);
+        continue;
+      }
+      const square = `${FILES[col]}${8 - row}`;
+      board.set(square, ch);
+      col += 1;
+    }
+  }
+  return board;
+}
+
+function toPieceKey(fenChar) {
+  const color = fenChar === fenChar.toUpperCase() ? "w" : "b";
+  return `${color}${fenChar.toUpperCase()}`;
+}
+
 export function createChessUI(options) {
   const {
     onLocalMove,
@@ -7,124 +39,120 @@ export function createChessUI(options) {
     getStartAcked,
     isConnected,
     getGameId,
-    onResetGame
+    onResetGame,
+    onReturnLobby
   } = options;
 
-  let board = null;
   let game = null;
-  let $gameView = null;
-  let $gameStatus = null;
-  let $playerColorStatus = null;
-  let $connectionAlert = null;
-  const inlinePieceCache = new Map();
+  let boardRoot = null;
+  let gameView = null;
+  let gameStatus = null;
+  let playerColorStatus = null;
+  let connectionAlert = null;
+  let selectedSquare = null;
+  let startFen = null;
+  let boardHandlers = [];
 
-  function getInlinePieceSvg(piece) {
-    const pieceGlyphs = {
-      wK: '\u2654',
-      wQ: '\u2655',
-      wR: '\u2656',
-      wB: '\u2657',
-      wN: '\u2658',
-      wP: '\u2659',
-      bK: '\u265A',
-      bQ: '\u265B',
-      bR: '\u265C',
-      bB: '\u265D',
-      bN: '\u265E',
-      bP: '\u265F'
-    };
-
-    if (inlinePieceCache.has(piece)) {
-      return inlinePieceCache.get(piece);
-    }
-
-    const glyph = pieceGlyphs[piece];
-    if (!glyph) return '';
-
-    const svg = [
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
-      '<rect width="100" height="100" fill="transparent"/>',
-      '<text',
-      ' x="50"',
-      ' y="54"',
-      ' text-anchor="middle"',
-      ' dominant-baseline="middle"',
-      ' font-size="78"',
-      ' font-family="Segoe UI Symbol, Noto Sans Symbols 2, Noto Sans Symbols, DejaVu Sans, Symbola, serif">',
-      glyph,
-      '</text>',
-      '</svg>'
-    ].join('');
-
-    const url = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-    inlinePieceCache.set(piece, url);
-    return url;
-  }
-
-  function onDragStart(source, piece) {
+  function canInteractWith(square) {
     if (game.game_over() || (!getGameStarted() && getGameId() == null) || !isConnected()) return false;
-    if (getLocalPlayerColor() == null) return false;
-    if (getLocalPlayerColor() === 'w' && !getStartAcked()) return false;
-    if (game.turn() !== getLocalPlayerColor()) return false;
-    if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
-        (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
-      return false;
+    const localColor = getLocalPlayerColor();
+    if (!localColor) return false;
+    if (localColor === "w" && !getStartAcked()) return false;
+    if (game.turn() !== localColor) return false;
+    const pieceChar = fenToBoardMap(game.fen()).get(square);
+    if (!pieceChar) return false;
+    const pieceColor = pieceChar === pieceChar.toUpperCase() ? "w" : "b";
+    return pieceColor === localColor;
+  }
+
+  function tryMove(from, to) {
+    const move = game.move({ from, to, promotion: "q" });
+    if (!move) return false;
+    const moveUci = move.from + move.to + (move.promotion ? move.promotion : "");
+    onLocalMove(moveUci);
+    selectedSquare = null;
+    renderBoard();
+    updateStatus();
+    return true;
+  }
+
+  function handleSquareClick(square) {
+    if (selectedSquare) {
+      if (!tryMove(selectedSquare, square)) {
+        selectedSquare = canInteractWith(square) ? square : null;
+      }
+      renderBoard();
+      return;
+    }
+    if (canInteractWith(square)) {
+      selectedSquare = square;
+      renderBoard();
     }
   }
 
-  function onDrop(source, target) {
-    const temp = { from: source, to: target, promotion: 'q' };
-    const move = game.move(temp);
-    if (!move) return 'snapback';
-
-    const moveUCI = move.from + move.to + (move.promotion ? move.promotion : '');
-    onLocalMove(moveUCI);
-    updateStatus();
+  function bindBoardHandlers() {
+    boardHandlers.forEach(({ el, fn }) => el.removeEventListener("click", fn));
+    boardHandlers = [];
+    boardRoot.querySelectorAll("[data-square]").forEach((sqEl) => {
+      const square = sqEl.getAttribute("data-square");
+      const fn = () => handleSquareClick(square);
+      sqEl.addEventListener("click", fn);
+      boardHandlers.push({ el: sqEl, fn });
+    });
   }
 
-  function onSnapEnd() {
-    board.position(game.fen());
+  function renderBoard() {
+    if (!boardRoot) return;
+    const pieces = fenToBoardMap(game.fen());
+    const rows = [];
+    for (let row = 8; row >= 1; row -= 1) {
+      for (let col = 0; col < 8; col += 1) {
+        const square = `${FILES[col]}${row}`;
+        const dark = (row + col) % 2 === 0;
+        const fenChar = pieces.get(square);
+        const pieceGlyph = fenChar ? PIECES[toPieceKey(fenChar)] || "" : "";
+        const selected = selectedSquare === square ? " selected" : "";
+        rows.push(
+          `<button type="button" class="cm-square ${dark ? "dark" : "light"}${selected}" data-square="${square}" aria-label="${square}">${pieceGlyph}</button>`
+        );
+      }
+    }
+    boardRoot.innerHTML = rows.join("");
+    bindBoardHandlers();
   }
-
-  const cbConfig = {
-    draggable: true,
-    position: 'start',
-    onDragStart,
-    onDrop,
-    onSnapEnd,
-    pieceTheme: getInlinePieceSvg
-  };
 
   function mount() {
-    $gameView = $('#gameView');
-    $gameStatus = $('#gameStatus');
-    $playerColorStatus = $('#playerColorStatus');
-    $connectionAlert = $('#connectionAlert');
-    $('#resetBtn').on('click', resetGame);
-    $('#returnLobbyBtn').on('click', options.onReturnLobby);
-    game = new Chess();
-    board = ChessBoard('board', cbConfig);
+    gameView = document.getElementById("gameView");
+    boardRoot = document.getElementById("board");
+    gameStatus = document.getElementById("gameStatus");
+    playerColorStatus = document.getElementById("playerColorStatus");
+    connectionAlert = document.getElementById("connectionAlert");
+    document.getElementById("resetBtn")?.addEventListener("click", resetGame);
+    document.getElementById("returnLobbyBtn")?.addEventListener("click", onReturnLobby);
+    game = createGameEngine({ startFen });
+    renderBoard();
     updateStatus();
   }
 
   function unmount() {
-    $('#resetBtn').off('click', resetGame);
-    $('#returnLobbyBtn').off('click', options.onReturnLobby);
-    if (board && typeof board.destroy === 'function') {
-      board.destroy();
-    }
-    board = null;
+    document.getElementById("resetBtn")?.removeEventListener("click", resetGame);
+    document.getElementById("returnLobbyBtn")?.removeEventListener("click", onReturnLobby);
+    boardHandlers.forEach(({ el, fn }) => el.removeEventListener("click", fn));
+    boardHandlers = [];
+    boardRoot = null;
     game = null;
-    $gameView = null;
-    $gameStatus = null;
-    $playerColorStatus = null;
-    $connectionAlert = null;
+    gameView = null;
+    gameStatus = null;
+    playerColorStatus = null;
+    connectionAlert = null;
+    selectedSquare = null;
   }
 
   function applyRemoteMove(uci) {
-    const move = game.move(uci, { sloppy: true });
+    const move = game.move(uci);
     if (move) {
-      board.position(game.fen());
+      selectedSquare = null;
+      renderBoard();
       updateStatus();
       return true;
     }
@@ -133,51 +161,56 @@ export function createChessUI(options) {
   }
 
   function updateStatus() {
-    if (!$gameStatus) return;
-    let status = '';
-    const moveColor = (game.turn() === 'b') ? 'Black' : 'White';
+    if (!gameStatus) return;
+    let status = "";
+    const moveColor = (game.turn() === "b") ? "Black" : "White";
     if (game.game_over()) {
       setGameStarted(false);
-      status = game.in_checkmate() ? `Game over, ${moveColor} is in checkmate.` : 'Game over, drawn position.';
+      status = game.in_checkmate() ? `Game over, ${moveColor} is in checkmate.` : "Game over, drawn position.";
     } else if (!getGameStarted()) {
-      status = 'Waiting for handshake...';
+      status = "Waiting for handshake...";
     } else {
-      status = moveColor + ' to move.';
-      if (game.in_check()) status += ' (Check!)';
+      status = `${moveColor} to move.`;
+      if (game.in_check()) status += " (Check!)";
     }
-    $gameStatus.text(status);
+    gameStatus.textContent = status;
   }
 
   function resetGame() {
-    game = new Chess();
-    board.position('start');
-    if (getGameId() != null) {
-      setGameStarted(true);
-    }
-    if (typeof onResetGame === 'function') {
-      onResetGame();
-    }
+    game = createGameEngine({ startFen });
+    selectedSquare = null;
+    renderBoard();
+    if (getGameId() != null) setGameStarted(true);
+    if (typeof onResetGame === "function") onResetGame();
+    updateStatus();
+  }
+
+  function setStartFen(fen) {
+    startFen = (typeof fen === "string" && fen.includes("/")) ? fen : null;
+    game.setStartFen(startFen);
+    selectedSquare = null;
+    renderBoard();
     updateStatus();
   }
 
   function setPlayerColorStatus(text) {
-    if ($playerColorStatus) $playerColorStatus.text(text || '');
+    if (playerColorStatus) playerColorStatus.textContent = text || "";
   }
 
   function showConnectionAlert(text) {
-    if ($connectionAlert) $connectionAlert.text(text || '');
+    if (connectionAlert) connectionAlert.textContent = text || "";
   }
 
   function clearConnectionAlert() {
-    if ($connectionAlert) $connectionAlert.text('');
+    if (connectionAlert) connectionAlert.textContent = "";
   }
 
   function showGameView() {
-    if ($gameView) $gameView.show();
+    if (gameView) gameView.style.display = "";
   }
 
   function hideGameView() {
-    if ($gameView) $gameView.hide();
+    if (gameView) gameView.style.display = "none";
   }
 
   return {
@@ -186,6 +219,7 @@ export function createChessUI(options) {
     applyRemoteMove,
     updateStatus,
     resetGame,
+    setStartFen,
     setPlayerColorStatus,
     showConnectionAlert,
     clearConnectionAlert,

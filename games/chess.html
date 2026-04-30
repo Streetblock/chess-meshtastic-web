@@ -1,4 +1,26 @@
-  <link rel="stylesheet" href="lib/chessboard-1.0.0.min.css" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css';">
+  <style>
+    #board {
+      width: min(92vw, 520px);
+      margin: 0 auto 10px;
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      border: 2px solid #1d1d1d;
+    }
+    .cm-square {
+      aspect-ratio: 1 / 1;
+      border: 0;
+      font-size: clamp(24px, 5vw, 42px);
+      line-height: 1;
+      cursor: pointer;
+      font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", serif;
+    }
+    .cm-square.light { background: #f0d9b5; }
+    .cm-square.dark { background: #b58863; }
+    .cm-square.selected {
+      outline: 3px solid #0b6cff;
+      outline-offset: -3px;
+    }
+  </style>
   <div id="gameView" style="display:none;">
     <div id="board"></div>
     <div id="playerColorStatus"></div>
