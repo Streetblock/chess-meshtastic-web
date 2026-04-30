@@ -115,7 +115,11 @@
       deriveUnbiasedStartId,
       shouldInitiateStartProposal,
       buildStartProposalMessage,
-      validateStartProposal
+      validateStartProposal,
+      buildAckMessage,
+      validateAckMessage,
+      buildMoveMessage,
+      buildSyncMessage
     } from "./protocol/pv2.js";
     import { buildChess960StartFen } from "./protocol/chess960.js";
 
@@ -547,8 +551,9 @@
       $gameView = $('#gameView');
       chessUI = createChessUI({
         onLocalMove: (moveUci) => {
-          const payload = { g: gameId, t: "M", d: moveUci };
-          sendMove(payload);
+          sendGameMoveUci(moveUci).catch((err) => {
+            console.warn("[GAME] Failed to send move", err);
+          });
           moveCount += 1;
           lastMoveUci = moveUci;
           scheduleMoveTimeout();
@@ -666,11 +671,43 @@
     // -------------------- Sending & Receiving Messages --------------------
     function sendPv2Hello() {
       const hello = buildHelloMessage(pv2);
-      sendMove(hello).catch((err) => {
+      sendPv2Message(hello).catch((err) => {
         console.warn("[PV2] HELLO send failed", err);
       });
       pv2.state = 'hello-sent';
       console.log("[PV2 TX]", hello);
+    }
+
+    async function sendPv2Message(message) {
+      return sendMove(message);
+    }
+
+    function shouldUsePv2GameMessages() {
+      return pv2.state === 'classic-started';
+    }
+
+    async function sendGameMoveUci(moveUci) {
+      if (shouldUsePv2GameMessages()) {
+        const moveMsg = buildMoveMessage(pv2, {
+          gameId,
+          uci: moveUci,
+          ply: moveCount + 1
+        });
+        return sendPv2Message(moveMsg);
+      }
+      return sendMove({ g: gameId, t: "M", d: moveUci });
+    }
+
+    async function sendGameSyncCount(isReply = false) {
+      if (shouldUsePv2GameMessages()) {
+        const syncMsg = buildSyncMessage(pv2, {
+          gameId,
+          moveCount,
+          reply: isReply
+        });
+        return sendPv2Message(syncMsg);
+      }
+      return sendMove({ t: "C", g: gameId, c: moveCount, r: isReply });
     }
 
     async function maybeSendPv2Reveal() {
@@ -761,10 +798,57 @@
           return true;
         }
         console.log("[PV2 RX] START accepted:", pv2.startProposal);
+        try {
+          const ack = buildAckMessage(pv2, 'START', true, '');
+          await sendPv2Message(ack);
+          console.log("[PV2 TX]", ack);
+        } catch (err) {
+          console.warn("[PV2] Failed to send START ACK", err);
+        }
         if (pv2.state !== 'classic-started') {
           pv2.state = 'classic-started';
           startClassicHandshake();
         }
+        return true;
+      }
+
+      if (moveMsg.t === 'ACK') {
+        const validated = validateAckMessage(moveMsg);
+        if (!validated.ok) {
+          console.warn("[PV2] ACK rejected:", validated.reason, moveMsg);
+          return true;
+        }
+        if (moveMsg.ackT === 'START') {
+          if (moveMsg.ok) {
+            console.log("[PV2 RX] START ACK accepted");
+          } else {
+            console.warn("[PV2 RX] START ACK reported error:", moveMsg.err || 'unknown');
+          }
+        }
+        return true;
+      }
+
+      if (moveMsg.t === 'MOVE') {
+        if (typeof moveMsg.gameId !== 'number') return true;
+        if (gameId == null || (moveMsg.gameId >>> 0) !== (gameId >>> 0)) return true;
+        if (typeof moveMsg.uci !== 'string' || moveMsg.uci.length < 4) return true;
+        console.log("[PV2 RX] MOVE:", moveMsg.uci);
+        const moved = chessUI ? chessUI.applyRemoteMove(moveMsg.uci) : false;
+        if (moved) {
+          moveCount += 1;
+          lastMoveUci = moveMsg.uci;
+          clearMoveTimers();
+          clearConnectionAlert();
+        }
+        return true;
+      }
+
+      if (moveMsg.t === 'SYNC') {
+        handleCountMessage({
+          g: moveMsg.gameId,
+          c: moveMsg.moveCount,
+          r: !!moveMsg.reply
+        });
         return true;
       }
 
@@ -1322,7 +1406,9 @@
     }
 
     function sendCountRequest(isReply = false) {
-      sendMove({ t: "C", g: gameId, c: moveCount, r: isReply });
+      sendGameSyncCount(isReply).catch((err) => {
+        console.warn("[GAME] Failed to send sync", err);
+      });
       awaitingCountReply = !isReply;
     }
 
@@ -1373,7 +1459,9 @@
         return;
       }
       if (msg.c < moveCount && lastMoveUci) {
-        sendMove({ g: gameId, t: "M", d: lastMoveUci });
+        sendGameMoveUci(lastMoveUci).catch((err) => {
+          console.warn("[GAME] Failed to resend move", err);
+        });
         return;
       }
       if (!msg.r) {

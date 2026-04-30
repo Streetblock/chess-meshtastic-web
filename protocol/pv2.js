@@ -305,3 +305,41 @@ export function validateStartProposal(ctx, msg) {
   ctx.state = 'start-received';
   return { ok: true };
 }
+
+export function buildAckMessage(ctx, ackT, ok = true, err = '') {
+  return buildPv2Envelope(ctx, 'ACK', {
+    ackT,
+    ok: !!ok,
+    err: ok ? '' : String(err || 'unknown')
+  });
+}
+
+export function validateAckMessage(msg) {
+  if (!msg || msg.t !== 'ACK') return { ok: false, reason: 'not-ack' };
+  if (typeof msg.ackT !== 'string' || msg.ackT.length === 0) {
+    return { ok: false, reason: 'bad-ack-target' };
+  }
+  if (typeof msg.ok !== 'boolean') {
+    return { ok: false, reason: 'bad-ack-ok' };
+  }
+  if (!msg.ok && typeof msg.err !== 'string') {
+    return { ok: false, reason: 'bad-ack-err' };
+  }
+  return { ok: true };
+}
+
+export function buildMoveMessage(ctx, payload) {
+  return buildPv2Envelope(ctx, 'MOVE', {
+    gameId: payload.gameId,
+    uci: payload.uci,
+    ply: payload.ply
+  });
+}
+
+export function buildSyncMessage(ctx, payload) {
+  return buildPv2Envelope(ctx, 'SYNC', {
+    gameId: payload.gameId,
+    moveCount: payload.moveCount,
+    reply: !!payload.reply
+  });
+}
