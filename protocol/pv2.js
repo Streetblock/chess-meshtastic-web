@@ -97,6 +97,31 @@ export async function verifyMessageMac(rawKeyBytes, message) {
   return expected === message.mac;
 }
 
+export async function finalizeOutboundPv2Message(ctx, message) {
+  if (!ctx?.auth?.enabled || !ctx?.auth?.keyBytes) return message;
+  const out = { ...message };
+  out.mac = await computeMessageMac(ctx.auth.keyBytes, out);
+  return out;
+}
+
+export async function validateInboundPv2Auth(ctx, message, options = {}) {
+  const requireMac = !!options.requireMac;
+  if (!ctx?.auth?.enabled || !ctx?.auth?.keyBytes) {
+    return { ok: true, verified: false, reason: 'auth-disabled' };
+  }
+  if (!message || typeof message.mac !== 'string' || message.mac.length < 16) {
+    if (requireMac) {
+      return { ok: false, verified: false, reason: 'missing-mac' };
+    }
+    return { ok: true, verified: false, reason: 'missing-mac' };
+  }
+  const verified = await verifyMessageMac(ctx.auth.keyBytes, message);
+  if (!verified) {
+    return { ok: false, verified: false, reason: 'bad-mac' };
+  }
+  return { ok: true, verified: true, reason: 'verified' };
+}
+
 async function hkdfSha256(ikmBytes, saltBytes, infoBytes, outLen = 32) {
   const baseKey = await crypto.subtle.importKey('raw', ikmBytes, 'HKDF', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(

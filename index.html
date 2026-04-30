@@ -120,7 +120,10 @@
       buildAckMessage,
       validateAckMessage,
       buildMoveMessage,
-      buildSyncMessage
+      buildSyncMessage,
+      finalizeOutboundPv2Message,
+      validateInboundPv2Auth,
+      requiresHardMacForType
     } from "./protocol/pv2.js";
     import { buildChess960StartFen } from "./protocol/chess960.js";
 
@@ -682,7 +685,8 @@
     }
 
     async function sendPv2Message(message) {
-      return sendMove(message);
+      const outbound = await finalizeOutboundPv2Message(pv2, message);
+      return sendMove(outbound);
     }
 
     function shouldUsePv2GameMessages() {
@@ -717,7 +721,7 @@
       if (!shouldSendReveal(pv2)) return;
       try {
         const reveal = buildRevealMessage(pv2);
-        await sendMove(reveal);
+        await sendPv2Message(reveal);
         console.log("[PV2 TX]", reveal);
       } catch (err) {
         console.warn("[PV2] REVEAL send failed", err);
@@ -750,7 +754,7 @@
       if (shouldInitiateStartProposal(pv2)) {
         const startMsg = buildStartProposalMessage(pv2, startPayload);
         try {
-          await sendMove(startMsg);
+          await sendPv2Message(startMsg);
           console.log("[PV2 TX]", startMsg);
         } catch (err) {
           console.warn("[PV2] START send failed", err);
@@ -773,6 +777,14 @@
       if (isReplayOrOutOfOrder(pv2, moveMsg, fromNode)) {
         console.warn("[PV2] Replay or out-of-order message ignored:", moveMsg);
         return true;
+      }
+      const authStatus = await validateInboundPv2Auth(pv2, moveMsg, { requireMac: false });
+      if (!authStatus.ok) {
+        console.warn("[PV2.1] Auth validation failed, message ignored:", authStatus.reason, moveMsg);
+        return true;
+      }
+      if (pv2.auth.enabled && !authStatus.verified) {
+        console.warn("[PV2.1] Message accepted without MAC (soft mode):", moveMsg.t);
       }
 
       if (moveMsg.t === 'HELLO') {
@@ -1280,7 +1292,7 @@
       }
       if (canUseCommitReveal(pv2)) {
         beginCommitRound(pv2).then((commitMsg) => {
-          sendMove(commitMsg)
+          sendPv2Message(commitMsg)
             .then(() => {
               console.log("[PV2 TX]", commitMsg);
             })
