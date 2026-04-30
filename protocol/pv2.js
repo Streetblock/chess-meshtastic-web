@@ -29,6 +29,15 @@ export function createPv2Context() {
   };
 }
 
+export function resetPv2Context(ctx) {
+  ctx.enabled = false;
+  ctx.sid = randomHex(16);
+  ctx.seq = 1;
+  ctx.remoteCaps = [];
+  ctx.peerSeqByNode.clear();
+  ctx.state = 'idle';
+}
+
 export function nextPv2Seq(ctx) {
   const current = ctx.seq >>> 0;
   ctx.seq = (current + 1) >>> 0;
@@ -74,4 +83,19 @@ export function isReplayOrOutOfOrder(ctx, msg, fromNode) {
   if (msg.seq <= previous) return true;
   ctx.peerSeqByNode.set(key, msg.seq >>> 0);
   return false;
+}
+
+export function buildHelloMessage(ctx) {
+  return buildPv2Envelope(ctx, 'HELLO', {
+    caps: [...ctx.localCaps]
+  });
+}
+
+export function applyRemoteHello(ctx, msg) {
+  if (!msg || msg.t !== 'HELLO') return { ok: false, reason: 'not-hello' };
+  const caps = Array.isArray(msg.caps) ? msg.caps.filter((x) => typeof x === 'string') : [];
+  ctx.enabled = true;
+  ctx.remoteCaps = caps;
+  ctx.state = 'hello-received';
+  return { ok: true, remoteCaps: caps };
 }

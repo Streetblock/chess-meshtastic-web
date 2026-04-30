@@ -99,9 +99,12 @@
     import { createChessUI } from "./games/chess.js";
     import {
       createPv2Context,
+      resetPv2Context,
       isPv2Message,
       validatePv2Message,
-      isReplayOrOutOfOrder
+      isReplayOrOutOfOrder,
+      buildHelloMessage,
+      applyRemoteHello
     } from "./protocol/pv2.js";
 
     const $connectionStatus = $('#connectionStatus');
@@ -572,6 +575,7 @@
         $('#connectSerialBtn').prop('disabled', true);
         $('#connectBleBtn').prop('disabled', true);
         $('#disconnectBtn').prop('disabled', false);
+        sendPv2Hello();
         updateLobbyStatus();
         startLobbyChannelTimer();
       } catch (e) {
@@ -616,6 +620,7 @@
         $('#connectSerialBtn').prop('disabled', true);
         $('#connectBleBtn').prop('disabled', true);
         $('#disconnectBtn').prop('disabled', false);
+        sendPv2Hello();
         updateLobbyStatus();
         startLobbyChannelTimer();
       } catch (e) {
@@ -636,6 +641,7 @@
       $('#connectSerialBtn').prop('disabled', false);
       $('#connectBleBtn').prop('disabled', false);
       $('#disconnectBtn').prop('disabled', true);
+      resetPv2Context(pv2);
       resetLobbyState();
       if (lobbyChannelTimerId) {
         clearTimeout(lobbyChannelTimerId);
@@ -646,20 +652,43 @@
     }
 
     // -------------------- Sending & Receiving Messages --------------------
+    function sendPv2Hello() {
+      const hello = buildHelloMessage(pv2);
+      sendMove(hello).catch((err) => {
+        console.warn("[PV2] HELLO send failed", err);
+      });
+      pv2.state = 'hello-sent';
+      console.log("[PV2 TX]", hello);
+    }
+
+    function handlePv2Message(moveMsg, rawMsg) {
+      const fromNode = rawMsg?.packet?.from ?? null;
+      const validation = validatePv2Message(moveMsg);
+      if (!validation.ok) {
+        console.warn("[PV2] Invalid message ignored:", validation.reason, moveMsg);
+        return true;
+      }
+      if (isReplayOrOutOfOrder(pv2, moveMsg, fromNode)) {
+        console.warn("[PV2] Replay or out-of-order message ignored:", moveMsg);
+        return true;
+      }
+
+      if (moveMsg.t === 'HELLO') {
+        const applied = applyRemoteHello(pv2, moveMsg);
+        if (applied.ok) {
+          console.log("[PV2] HELLO accepted. remote caps:", applied.remoteCaps);
+        }
+        return true;
+      }
+
+      console.log("[PV2 RX]", moveMsg);
+      return true;
+    }
+
     conn.onMove((moveMsg, rawMsg) => {
       if (!moveMsg || !moveMsg.t) return;
       if (isPv2Message(moveMsg)) {
-        const fromNode = rawMsg?.packet?.from ?? null;
-        const validation = validatePv2Message(moveMsg);
-        if (!validation.ok) {
-          console.warn("[PV2] Invalid message ignored:", validation.reason, moveMsg);
-          return;
-        }
-        if (isReplayOrOutOfOrder(pv2, moveMsg, fromNode)) {
-          console.warn("[PV2] Replay or out-of-order message ignored:", moveMsg);
-          return;
-        }
-        console.log("[PV2 RX]", moveMsg);
+        handlePv2Message(moveMsg, rawMsg);
         return;
       }
       const packetChannel = rawMsg?.packet?.channel ?? 0;
