@@ -111,8 +111,13 @@
       shouldSendReveal,
       buildRevealMessage,
       applyRemoteReveal,
-      isCommitRoundReady
+      isCommitRoundReady,
+      deriveUnbiasedStartId,
+      shouldInitiateStartProposal,
+      buildStartProposalMessage,
+      validateStartProposal
     } from "./protocol/pv2.js";
+    import { buildChess960StartFen } from "./protocol/chess960.js";
 
     const $connectionStatus = $('#connectionStatus');
     const $lobbyStatus = $('#lobbyStatus');
@@ -679,6 +684,33 @@
       }
     }
 
+    async function maybeFinalizePv2CommitRound() {
+      if (!isCommitRoundReady(pv2)) return;
+      const { startId, seedHash } = await deriveUnbiasedStartId(pv2);
+      const startFen = buildChess960StartFen(startId);
+      const startPayload = {
+        variant: 'chess960',
+        startId,
+        startFen,
+        seedHash
+      };
+
+      if (shouldInitiateStartProposal(pv2)) {
+        const startMsg = buildStartProposalMessage(pv2, startPayload);
+        try {
+          await sendMove(startMsg);
+          console.log("[PV2 TX]", startMsg);
+        } catch (err) {
+          console.warn("[PV2] START send failed", err);
+        }
+      }
+
+      if (pv2.state !== 'classic-started') {
+        pv2.state = 'classic-started';
+        startClassicHandshake();
+      }
+    }
+
     async function handlePv2Message(moveMsg, rawMsg) {
       const fromNode = rawMsg?.packet?.from ?? null;
       const validation = validatePv2Message(moveMsg);
@@ -707,6 +739,7 @@
         }
         console.log("[PV2 RX] COMMIT accepted");
         await maybeSendPv2Reveal();
+        await maybeFinalizePv2CommitRound();
         return true;
       }
 
@@ -717,9 +750,20 @@
           return true;
         }
         console.log("[PV2 RX] REVEAL accepted");
-        if (isCommitRoundReady(pv2)) {
-          pv2.state = 'commit-ready';
-          console.log("[PV2] Commit round ready");
+        await maybeFinalizePv2CommitRound();
+        return true;
+      }
+
+      if (moveMsg.t === 'START') {
+        const validated = validateStartProposal(pv2, moveMsg);
+        if (!validated.ok) {
+          console.warn("[PV2] START rejected:", validated.reason, moveMsg);
+          return true;
+        }
+        console.log("[PV2 RX] START accepted:", pv2.startProposal);
+        if (pv2.state !== 'classic-started') {
+          pv2.state = 'classic-started';
+          startClassicHandshake();
         }
         return true;
       }
@@ -1095,6 +1139,7 @@
       mySeed = null;
       opponentSeed = null;
       pv2.commitRound = null;
+      pv2.startProposal = null;
       if (pv2.enabled) {
         pv2.state = 'hello-received';
       }
@@ -1127,7 +1172,12 @@
             .then(() => {
               console.log("[PV2 TX]", commitMsg);
             })
-            .then(() => maybeSendPv2Reveal());
+            .then(() => maybeSendPv2Reveal())
+            .then(() => maybeFinalizePv2CommitRound())
+            .catch((err) => {
+              console.warn("[PV2] Commit round send failed, fallback to pv1", err);
+              startClassicHandshake();
+            });
         }).catch((err) => {
           console.warn("[PV2] Commit round start failed, fallback to pv1", err);
           startClassicHandshake();

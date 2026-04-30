@@ -34,6 +34,25 @@ async function sha256Hex(text) {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+async function sha256Bytes(data) {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', data));
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function concatBytes(...chunks) {
+  const total = chunks.reduce((sum, c) => sum + c.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
 export function createPv2Context() {
   return {
     enabled: false,
@@ -44,7 +63,8 @@ export function createPv2Context() {
     remoteCaps: [],
     peerSeqByNode: new Map(),
     state: 'idle',
-    commitRound: null
+    commitRound: null,
+    startProposal: null
   };
 }
 
@@ -56,6 +76,7 @@ export function resetPv2Context(ctx) {
   ctx.peerSeqByNode.clear();
   ctx.state = 'idle';
   ctx.commitRound = null;
+  ctx.startProposal = null;
 }
 
 export function nextPv2Seq(ctx) {
@@ -214,4 +235,73 @@ export function isCommitRoundReady(ctx) {
     ctx.commitRound.localNonceHex &&
     ctx.commitRound.remoteNonceHex
   );
+}
+
+export async function deriveUnbiasedStartId(ctx) {
+  if (!isCommitRoundReady(ctx)) {
+    throw new Error('commit round is not ready');
+  }
+
+  const noncePair = [ctx.commitRound.localNonceHex, ctx.commitRound.remoteNonceHex].sort();
+  const sidBytes = new TextEncoder().encode(ctx.sid);
+  const cidBytes = new TextEncoder().encode(ctx.commitRound.cid);
+  const nonceA = hexToBytes(noncePair[0]);
+  const nonceB = hexToBytes(noncePair[1]);
+  const domain = new TextEncoder().encode('c960-seed-v1');
+  const base = concatBytes(domain, sidBytes, cidBytes, nonceA, nonceB);
+
+  let stream = await sha256Bytes(base);
+  let offset = 0;
+  let counter = 0;
+
+  while (true) {
+    if (offset + 2 > stream.length) {
+      counter += 1;
+      const counterBytes = new Uint8Array([
+        (counter >>> 24) & 0xff,
+        (counter >>> 16) & 0xff,
+        (counter >>> 8) & 0xff,
+        counter & 0xff
+      ]);
+      stream = await sha256Bytes(concatBytes(base, counterBytes));
+      offset = 0;
+    }
+    const candidate = (stream[offset] << 8) | stream[offset + 1];
+    offset += 2;
+    if (candidate < 960) {
+      return { startId: candidate, seedHash: bytesToHex(await sha256Bytes(base)) };
+    }
+  }
+}
+
+export function shouldInitiateStartProposal(ctx) {
+  if (!ctx.commitRound?.localCommit || !ctx.commitRound?.remoteCommit) return false;
+  return ctx.commitRound.localCommit >= ctx.commitRound.remoteCommit;
+}
+
+export function buildStartProposalMessage(ctx, payload) {
+  ctx.startProposal = { ...payload };
+  ctx.state = 'start-sent';
+  return buildPv2Envelope(ctx, 'START', payload);
+}
+
+export function validateStartProposal(ctx, msg) {
+  if (!msg || msg.t !== 'START') return { ok: false, reason: 'not-start' };
+  if (!Number.isInteger(msg.startId) || msg.startId < 0 || msg.startId > 959) {
+    return { ok: false, reason: 'bad-start-id' };
+  }
+  if (typeof msg.startFen !== 'string' || !msg.startFen.includes('/')) {
+    return { ok: false, reason: 'bad-start-fen' };
+  }
+  if (typeof msg.variant !== 'string') {
+    return { ok: false, reason: 'bad-variant' };
+  }
+  ctx.startProposal = {
+    startId: msg.startId,
+    startFen: msg.startFen,
+    variant: msg.variant,
+    seedHash: msg.seedHash || ''
+  };
+  ctx.state = 'start-received';
+  return { ok: true };
 }
