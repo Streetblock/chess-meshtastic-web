@@ -733,9 +733,8 @@
         startFen,
         seedHash
       };
-      negotiatedStartFen = startFen;
+      activateNegotiatedStartFen(startFen);
       if (chessUI) {
-        chessUI.setStartFen(negotiatedStartFen);
         chessUI.resetGame();
       }
 
@@ -805,9 +804,8 @@
           return true;
         }
         console.log("[PV2 RX] START accepted:", pv2.startProposal);
-        negotiatedStartFen = pv2.startProposal?.startFen || negotiatedStartFen;
+        activateNegotiatedStartFen(pv2.startProposal?.startFen || negotiatedStartFen);
         if (chessUI) {
-          chessUI.setStartFen(negotiatedStartFen);
           chessUI.resetGame();
         }
         try {
@@ -1204,7 +1202,7 @@
       $lobbyView.hide();
       if (chessUI) chessUI.showGameView();
       resetHandshake();
-      if (chessUI) chessUI.setStartFen(negotiatedStartFen);
+      activateNegotiatedStartFen(negotiatedStartFen);
       if (chessUI) chessUI.resetGame();
       startHandshake();
     }
@@ -1231,6 +1229,13 @@
       $lobbyEvents.prependTo($lobbyLayout);
     }
 
+    function activateNegotiatedStartFen(startFen) {
+      const normalizedFen = (typeof startFen === 'string' && startFen.includes('/')) ? startFen : null;
+      negotiatedStartFen = normalizedFen;
+      if (!chessUI) return;
+      chessUI.setStartFen(negotiatedStartFen);
+    }
+
     // -------------------- Handshake --------------------
     function resetHandshake() {
       mySeed = null;
@@ -1248,14 +1253,13 @@
       iAmStarter = null;
       startAcked = false;
       startReceived = false;
-      negotiatedStartFen = null;
+      activateNegotiatedStartFen(null);
       stopHandshakeRetryLoop();
       moveCount = 0;
       lastMoveUci = null;
       clearMoveTimers();
       clearConnectionAlert();
       if (chessUI) chessUI.setPlayerColorStatus("");
-      if (chessUI) chessUI.setStartFen(null);
       if (chessUI) chessUI.updateStatus();
     }
 
