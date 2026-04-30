@@ -1,42 +1,67 @@
-# Protocol Test Matrix (v1.0 <-> v2.0)
+# Protocol Test Matrix (`pv1` / `pv2.0` / `pv2.1`)
 
-Dieses Dokument beschreibt den minimalen Interop-Testumfang fuer den `feature-protocol-v2-0` Branch.
+This matrix covers interoperability for:
+- Legacy flow (`pv1`)
+- Commit/Reveal + Chess960 flow (`pv2.0`)
+- Authenticated flow (`pv2.1`)
 
-## Ziel
+## Preconditions
+- Two test nodes (`A`, `B`) on the same mesh.
+- Clean browser state (reload, reconnect between cases).
+- Logging enabled in DevTools for both sides.
+- For `pv2.1` tests, ensure both sides are on a branch with HMAC support.
 
-- Stabiler Spielstart zwischen Legacy (`1.0`) und `2.0`
-- `MOVE`/`SYNC` Kommunikation ohne HMAC
-- Fallback-Verhalten in gemischten Versionen pruefen
+## Legend
+- `OK`: expected to succeed.
+- `FALLBACK`: expected to use legacy compatibility path.
+- `REJECT`: expected rejection (protocol/auth mismatch).
 
 ## Matrix
 
-| Local Client | Remote Client | Erwartung Start | Erwartung Zuege/Sync | Ergebnis |
-| --- | --- | --- | --- | --- |
-| 1.0 | 1.0 | Legacy `H/S/K` | Legacy `M/C` | TBD |
-| 2.0 | 2.0 | pv2 `START/ACK` + Legacy-Handshake weiterhin kompatibel | pv2 `MOVE/SYNC` mit Legacy-Fallback | TBD |
-| 2.0 | 1.0 | Start ueber Legacy kompatibel | Zuege/Sync ueber Legacy `M/C` (Fallback) | TBD |
-| 1.0 | 2.0 | Start ueber Legacy kompatibel | Zuege/Sync ueber Legacy `M/C` | TBD |
+| A version | B version | Lobby/Match | Start handshake | Move exchange | Sync/Retry | Expected |
+|---|---|---|---|---|---|---|
+| `pv1` | `pv1` | legacy | legacy `H/S/K` | legacy `M` | legacy `C` | `OK` |
+| `pv2.0` | `pv2.0` | `HELLO` + lobby | Commit/Reveal + `START/ACK` + classic bridge | `MOVE` | `SYNC` | `OK` |
+| `pv2.1` | `pv2.1` | `HELLO` + caps | Commit/Reveal + `START/ACK` (MAC) | `MOVE` (MAC) | `SYNC` (MAC) | `OK` |
+| `pv2.0` | `pv1` | lobby mixed | legacy bridge | legacy fallback | legacy fallback | `FALLBACK` |
+| `pv2.1` | `pv1` | lobby mixed | legacy mirror path | legacy mirror (`M`) | legacy mirror (`C`) | `FALLBACK` |
+| `pv2.1` | `pv2.0` (no `hmac` cap) | `HELLO` | Commit/Reveal + `START/ACK` | `MOVE` + legacy mirror | `SYNC` + legacy mirror | `FALLBACK` |
+| `pv2.1` | `pv2.0` (claims `hmac`, no valid MAC) | `HELLO` | start may begin | `MOVE/SYNC` auth check | auth check | `REJECT` |
 
-## Manueller Smoke-Test Plan (1.0 <-> 2.0)
+## Per-case checks
 
-1. Zwei Knoten verbinden, gleiche Channel-Konfiguration sicherstellen.
-2. Spiel von `2.0` gegen `1.0` starten.
-3. Pruefen:
-- beide Seiten erhalten dieselbe `gameId`
-- Farbe wird auf beiden Seiten gesetzt
-- Spielstatus wechselt von "Waiting for handshake" zu "to move"
-4. Je Seite mindestens 3 gueltige Zuege machen.
-5. Pruefen:
-- jeder Zug kommt genau einmal beim Gegenueber an
-- `moveCount` bleibt auf beiden Seiten konsistent
-6. Sync-Fall pruefen:
-- auf einer Seite kurz warten bis Sync-Mechanismus anspringt
-- Gegenstelle antwortet mit kompatibler Count-Info
-7. Neustart eines Spiels im selben Pairing pruefen:
-- alte `gameId` wird nicht weiterverwendet
-- neuer Start laeuft ohne UI-Reset-Fehler
+1. Connection and hello:
+- Verify `HELLO` is sent/received on both sides (`[PV2 TX]`, `[PV2] HELLO accepted`).
 
-## Log-Hinweise
+2. Commit/Reveal:
+- Verify both `COMMIT` and `REVEAL` messages are accepted.
+- Verify both sides reach commit-ready and derive same `startId`/`startFen`.
 
-- pv2-Logs sollten nur bei `2.0 <-> 2.0` sichtbar sein.
-- Bei `1.0 <-> 2.0` duerfen keine harten pv2-Abbrueche auftreten; Legacy muss weiter funktionieren.
+3. Start proposal and ACK:
+- Verify `START` accepted on peer.
+- Verify `ACK` returned and logged (`START ACK accepted`).
+
+4. Move path:
+- In `pv2.1 <-> pv2.1`, verify `MOVE` and MAC checks pass.
+- In mixed (`no hmac` peer), verify mirrored legacy move is sent when required.
+
+5. Sync path:
+- Trigger timeout or manual retry and verify `SYNC` path.
+- In mixed mode, verify legacy mirror for sync (`C`) is emitted.
+
+6. Negative/auth tests:
+- Tamper with `mac` (or remove it) on critical message (`START`/`MOVE`/`SYNC`) and verify rejection.
+
+## Quick manual scenarios
+
+1. `pv2.1` vs `pv1`:
+- Start game from `pv2.1`.
+- Confirm moves still arrive on `pv1` side via mirror path.
+
+2. `pv2.1` vs `pv2.0`:
+- Confirm both can start and play.
+- Confirm `pv2.1` logs mirror mode for peers without `hmac` cap.
+
+3. `pv2.1` vs `pv2.1`:
+- Confirm no legacy mirror needed.
+- Confirm critical message auth enforcement works.
