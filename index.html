@@ -835,7 +835,7 @@
           await sendPv2Message(ack);
           console.log("[PV2 TX]", ack);
         } catch (err) {
-          console.warn("[PV2] Failed to send START ACK", err);
+          console.warn("[PV2.1] Failed to send START ACK", err);
         }
         if (pv2.state !== 'classic-started') {
           pv2.state = 'classic-started';
@@ -883,7 +883,6 @@
         });
         return true;
       }
-
       console.log("[PV2 RX]", moveMsg);
       return true;
     }
