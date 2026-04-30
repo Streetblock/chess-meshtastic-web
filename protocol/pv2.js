@@ -1,3 +1,5 @@
+import { buildChess960StartFen } from './chess960.js';
+
 const PV2 = 2;
 const ALLOWED_TYPES = new Set([
   'HELLO',
@@ -292,6 +294,15 @@ export function validateStartProposal(ctx, msg) {
   }
   if (typeof msg.startFen !== 'string' || !msg.startFen.includes('/')) {
     return { ok: false, reason: 'bad-start-fen' };
+  }
+  let expectedFen = '';
+  try {
+    expectedFen = buildChess960StartFen(msg.startId);
+  } catch (_) {
+    return { ok: false, reason: 'bad-start-id-fen' };
+  }
+  if (msg.startFen !== expectedFen) {
+    return { ok: false, reason: 'start-fen-mismatch' };
   }
   if (typeof msg.variant !== 'string') {
     return { ok: false, reason: 'bad-variant' };

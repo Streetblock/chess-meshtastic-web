@@ -1,3 +1,5 @@
+import { createGameEngine } from "./engine/chess-engine.js";
+
 export function createChessUI(options) {
   const {
     onLocalMove,
@@ -7,7 +9,8 @@ export function createChessUI(options) {
     getStartAcked,
     isConnected,
     getGameId,
-    onResetGame
+    onResetGame,
+    getGameMode
   } = options;
 
   let board = null;
@@ -16,6 +19,7 @@ export function createChessUI(options) {
   let $gameStatus = null;
   let $playerColorStatus = null;
   let $connectionAlert = null;
+  let startFen = null;
   const inlinePieceCache = new Map();
 
   function getInlinePieceSvg(piece) {
@@ -102,8 +106,14 @@ export function createChessUI(options) {
     $connectionAlert = $('#connectionAlert');
     $('#resetBtn').on('click', resetGame);
     $('#returnLobbyBtn').on('click', options.onReturnLobby);
-    game = new Chess();
+    game = createGameEngine({
+      mode: typeof getGameMode === 'function' ? getGameMode() : 'classic',
+      startFen
+    });
     board = ChessBoard('board', cbConfig);
+    if (startFen) {
+      board.position(startFen);
+    }
     updateStatus();
   }
 
@@ -149,8 +159,11 @@ export function createChessUI(options) {
   }
 
   function resetGame() {
-    game = new Chess();
-    board.position('start');
+    game = createGameEngine({
+      mode: typeof getGameMode === 'function' ? getGameMode() : 'classic',
+      startFen
+    });
+    board.position(startFen || 'start');
     if (getGameId() != null) {
       setGameStarted(true);
     }
@@ -180,6 +193,33 @@ export function createChessUI(options) {
     if ($gameView) $gameView.hide();
   }
 
+  function setStartFen(fen) {
+    startFen = (typeof fen === 'string' && fen.includes('/')) ? fen : null;
+    try {
+      game = createGameEngine({
+        mode: typeof getGameMode === 'function' ? getGameMode() : 'classic',
+        startFen
+      });
+      if (board) {
+        board.position(startFen || 'start');
+      }
+      updateStatus();
+      return true;
+    } catch (err) {
+      console.warn("[GAME] Invalid start FEN, falling back to classic start.", err);
+      startFen = null;
+      game = createGameEngine({
+        mode: typeof getGameMode === 'function' ? getGameMode() : 'classic',
+        startFen: null
+      });
+      if (board) {
+        board.position('start');
+      }
+      updateStatus();
+      return false;
+    }
+  }
+
   return {
     mount,
     unmount,
@@ -190,6 +230,7 @@ export function createChessUI(options) {
     showConnectionAlert,
     clearConnectionAlert,
     showGameView,
-    hideGameView
+    hideGameView,
+    setStartFen
   };
 }

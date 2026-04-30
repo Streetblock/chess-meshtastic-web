@@ -153,6 +153,7 @@
     let handshakeRetries = 0;
     let startAcked = false;
     let startReceived = false;
+    let negotiatedStartFen = null;
     const HANDSHAKE_RETRY_INTERVAL_MS = 30 * 1000;
     const HANDSHAKE_RETRY_LIMIT = 6;
     const LOBBY_CHANNEL_NAME = "GameLobby";
@@ -564,6 +565,7 @@
         getStartAcked: () => startAcked,
         isConnected: () => (conn.connected || !!bleConnection),
         getGameId: () => gameId,
+        getGameMode: () => (negotiatedStartFen ? 'chess960' : 'classic'),
         onResetGame: () => {
           moveCount = 0;
           lastMoveUci = null;
@@ -731,6 +733,11 @@
         startFen,
         seedHash
       };
+      negotiatedStartFen = startFen;
+      if (chessUI) {
+        chessUI.setStartFen(negotiatedStartFen);
+        chessUI.resetGame();
+      }
 
       if (shouldInitiateStartProposal(pv2)) {
         const startMsg = buildStartProposalMessage(pv2, startPayload);
@@ -798,6 +805,11 @@
           return true;
         }
         console.log("[PV2 RX] START accepted:", pv2.startProposal);
+        negotiatedStartFen = pv2.startProposal?.startFen || negotiatedStartFen;
+        if (chessUI) {
+          chessUI.setStartFen(negotiatedStartFen);
+          chessUI.resetGame();
+        }
         try {
           const ack = buildAckMessage(pv2, 'START', true, '');
           await sendPv2Message(ack);
@@ -1191,8 +1203,9 @@
       pendingInviteNode = null;
       $lobbyView.hide();
       if (chessUI) chessUI.showGameView();
-      if (chessUI) chessUI.resetGame();
       resetHandshake();
+      if (chessUI) chessUI.setStartFen(negotiatedStartFen);
+      if (chessUI) chessUI.resetGame();
       startHandshake();
     }
 
@@ -1235,12 +1248,14 @@
       iAmStarter = null;
       startAcked = false;
       startReceived = false;
+      negotiatedStartFen = null;
       stopHandshakeRetryLoop();
       moveCount = 0;
       lastMoveUci = null;
       clearMoveTimers();
       clearConnectionAlert();
       if (chessUI) chessUI.setPlayerColorStatus("");
+      if (chessUI) chessUI.setStartFen(null);
       if (chessUI) chessUI.updateStatus();
     }
 
