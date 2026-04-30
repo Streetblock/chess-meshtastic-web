@@ -778,7 +778,8 @@
         console.warn("[PV2] Replay or out-of-order message ignored:", moveMsg);
         return true;
       }
-      const authStatus = await validateInboundPv2Auth(pv2, moveMsg, { requireMac: false });
+      const requireMac = pv2.auth.enabled && requiresHardMacForType(moveMsg.t);
+      const authStatus = await validateInboundPv2Auth(pv2, moveMsg, { requireMac });
       if (!authStatus.ok) {
         console.warn("[PV2.1] Auth validation failed, message ignored:", authStatus.reason, moveMsg);
         return true;

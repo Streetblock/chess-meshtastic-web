@@ -11,6 +11,7 @@ const ALLOWED_TYPES = new Set([
   'SYNC',
   'RESYNC'
 ]);
+const HARD_AUTH_TYPES = new Set(['START', 'ACK', 'MOVE', 'SYNC']);
 
 function randomHex(bytes) {
   const arr = new Uint8Array(bytes);
@@ -120,6 +121,10 @@ export async function validateInboundPv2Auth(ctx, message, options = {}) {
     return { ok: false, verified: false, reason: 'bad-mac' };
   }
   return { ok: true, verified: true, reason: 'verified' };
+}
+
+export function requiresHardMacForType(type) {
+  return HARD_AUTH_TYPES.has(type);
 }
 
 async function hkdfSha256(ikmBytes, saltBytes, infoBytes, outLen = 32) {
