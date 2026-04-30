@@ -690,7 +690,7 @@
     }
 
     function shouldUsePv2GameMessages() {
-      return pv2.state === 'classic-started';
+      return pv2.auth.enabled;
     }
 
     async function sendGameMoveUci(moveUci) {
