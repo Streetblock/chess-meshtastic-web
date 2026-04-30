@@ -113,6 +113,7 @@
       applyRemoteReveal,
       isCommitRoundReady,
       deriveUnbiasedStartId,
+      deriveAndActivateAuthKey,
       shouldInitiateStartProposal,
       buildStartProposalMessage,
       validateStartProposal,
@@ -725,6 +726,14 @@
 
     async function maybeFinalizePv2CommitRound() {
       if (!isCommitRoundReady(pv2)) return;
+      if (!pv2.auth.enabled) {
+        try {
+          await deriveAndActivateAuthKey(pv2);
+          console.log("[PV2.1] Auth key activated");
+        } catch (err) {
+          console.warn("[PV2.1] Auth key derivation failed", err);
+        }
+      }
       const { startId, seedHash } = await deriveUnbiasedStartId(pv2);
       const startFen = buildChess960StartFen(startId);
       const startPayload = {

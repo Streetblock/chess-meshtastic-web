@@ -97,6 +97,21 @@ export async function verifyMessageMac(rawKeyBytes, message) {
   return expected === message.mac;
 }
 
+async function hkdfSha256(ikmBytes, saltBytes, infoBytes, outLen = 32) {
+  const baseKey = await crypto.subtle.importKey('raw', ikmBytes, 'HKDF', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: saltBytes,
+      info: infoBytes
+    },
+    baseKey,
+    outLen * 8
+  );
+  return new Uint8Array(bits);
+}
+
 export function createPv2Context() {
   return {
     enabled: false,
@@ -328,6 +343,24 @@ export async function deriveUnbiasedStartId(ctx) {
       return { startId: candidate, seedHash: bytesToHex(await sha256Bytes(base)) };
     }
   }
+}
+
+export async function deriveAndActivateAuthKey(ctx) {
+  if (!isCommitRoundReady(ctx)) {
+    throw new Error('commit round is not ready');
+  }
+
+  const noncePair = [ctx.commitRound.localNonceHex, ctx.commitRound.remoteNonceHex].sort();
+  const nonceA = hexToBytes(noncePair[0]);
+  const nonceB = hexToBytes(noncePair[1]);
+  const ikm = concatBytes(nonceA, nonceB);
+  const salt = new TextEncoder().encode(`meshtastic-chess|pv2.1|${ctx.sid}|${ctx.commitRound.cid}`);
+  const info = new TextEncoder().encode('auth');
+  const keyBytes = await hkdfSha256(ikm, salt, info, 32);
+
+  ctx.auth.enabled = true;
+  ctx.auth.keyBytes = keyBytes;
+  return keyBytes;
 }
 
 export function shouldInitiateStartProposal(ctx) {
